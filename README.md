@@ -74,3 +74,4 @@ golangci-lint run ./...
 ## Project goal
 
 Provide a reusable, secure, Hugo-oriented MCP surface that improves agent discoverability and content reading without creating an execution platform.
+Is Your Site Agent-Ready? https://isitagentready.com/www.arleo.eu
