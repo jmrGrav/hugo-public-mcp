@@ -1,4 +1,4 @@
-mcp.example.com {
+mcp.arleo.eu {
     encode zstd gzip
     log {
         output stderr

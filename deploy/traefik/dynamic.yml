@@ -1,7 +1,7 @@
 http:
   routers:
     hugo-public-mcp:
-      rule: Host(`mcp.example.com`)
+      rule: Host(`mcp.arleo.eu`)
       entryPoints:
         - websecure
       tls: {}

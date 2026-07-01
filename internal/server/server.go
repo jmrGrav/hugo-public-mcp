@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -19,7 +20,7 @@ import (
 
 const (
 	Name    = "hugo-public-mcp"
-	Version = "0.1.0"
+	Version = "v0.0.1"
 )
 
 type Service struct {
@@ -116,6 +117,22 @@ func (s *Service) httpHandler(logger *slog.Logger) http.Handler {
 			)
 		}()
 		switch r.URL.Path {
+		case "/.well-known/mcp.json":
+			if r.Method != http.MethodGet && r.Method != http.MethodHead {
+				status = http.StatusMethodNotAllowed
+				w.Header().Set("Allow", http.MethodGet+", "+http.MethodHead)
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			card := buildDiscoveryCard(r)
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.Header().Set("Cache-Control", "public, max-age=300")
+			w.WriteHeader(http.StatusOK)
+			if r.Method == http.MethodHead {
+				return
+			}
+			_ = json.NewEncoder(w).Encode(card)
+			return
 		case "/mcp":
 			if r.Method != http.MethodPost {
 				status = http.StatusMethodNotAllowed
@@ -158,4 +175,63 @@ func (s *Service) httpHandler(logger *slog.Logger) http.Handler {
 
 func containsJSON(v string) bool {
 	return strings.Contains(strings.ToLower(v), "application/json")
+}
+
+type serverCard struct {
+	Name        string            `json:"name"`
+	Version     string            `json:"version"`
+	Description string            `json:"description"`
+	Endpoint    string            `json:"endpoint"`
+	Discovery   string            `json:"discovery"`
+	Transport   string            `json:"transport"`
+	Auth        string            `json:"auth"`
+	ReadOnly    bool              `json:"read_only"`
+	Tools       []string          `json:"tools"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+}
+
+func buildDiscoveryCard(r *http.Request) serverCard {
+	base := requestBaseURL(r)
+	return serverCard{
+		Name:        Name,
+		Version:     Version,
+		Description: "Read-only MCP server for published Hugo sites.",
+		Endpoint:    base + "/mcp",
+		Discovery:   base + "/.well-known/mcp.json",
+		Transport:   "streamable-http",
+		Auth:        "none",
+		ReadOnly:    true,
+		Tools: []string{
+			"list_pages",
+			"get_page",
+			"search_pages",
+			"get_recent_posts",
+			"list_tags",
+			"list_categories",
+			"get_sitemap",
+			"get_feed",
+			"get_site_information",
+		},
+		Metadata: map[string]string{
+			"scope": "public-read-only",
+		},
+	}
+}
+
+func requestBaseURL(r *http.Request) string {
+	if r == nil {
+		return "https://mcp.arleo.eu"
+	}
+	scheme := "https"
+	if xf := strings.TrimSpace(r.Header.Get("X-Forwarded-Proto")); xf != "" {
+		scheme = strings.ToLower(xf)
+	}
+	host := strings.TrimSpace(r.Header.Get("X-Forwarded-Host"))
+	if host == "" {
+		host = strings.TrimSpace(r.Host)
+	}
+	if host == "" {
+		host = "mcp.arleo.eu"
+	}
+	return scheme + "://" + host
 }

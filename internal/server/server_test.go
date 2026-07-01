@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -63,6 +64,57 @@ func TestHTTPHandlerDisablesStreamingEndpointWhenConfigured(t *testing.T) {
 
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("status = %d want %d", rec.Code, http.StatusNotFound)
+	}
+}
+
+func TestHTTPHandlerServesDiscoveryCard(t *testing.T) {
+	svc := mustTestService(t, true)
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/mcp.json", nil)
+	req.Host = "mcp.arleo.eu"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	rec := httptest.NewRecorder()
+
+	svc.HTTPHandler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d want %d", rec.Code, http.StatusOK)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Fatalf("content-type = %q", ct)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "public, max-age=300" {
+		t.Fatalf("cache-control = %q", got)
+	}
+	var card struct {
+		Name      string   `json:"name"`
+		Version   string   `json:"version"`
+		Endpoint  string   `json:"endpoint"`
+		Discovery string   `json:"discovery"`
+		Transport string   `json:"transport"`
+		Auth      string   `json:"auth"`
+		ReadOnly  bool     `json:"read_only"`
+		Tools     []string `json:"tools"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &card); err != nil {
+		t.Fatalf("unmarshal discovery card: %v", err)
+	}
+	if card.Name != Name {
+		t.Fatalf("name = %q want %q", card.Name, Name)
+	}
+	if card.Version != Version {
+		t.Fatalf("version = %q want %q", card.Version, Version)
+	}
+	if card.Endpoint != "https://mcp.arleo.eu/mcp" {
+		t.Fatalf("endpoint = %q", card.Endpoint)
+	}
+	if card.Discovery != "https://mcp.arleo.eu/.well-known/mcp.json" {
+		t.Fatalf("discovery = %q", card.Discovery)
+	}
+	if card.Transport != "streamable-http" || card.Auth != "none" || !card.ReadOnly {
+		t.Fatalf("unexpected discovery card = %#v", card)
+	}
+	if len(card.Tools) == 0 {
+		t.Fatal("expected tools in discovery card")
 	}
 }
 
