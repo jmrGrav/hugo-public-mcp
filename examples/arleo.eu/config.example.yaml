@@ -1,0 +1,22 @@
+site_root: /home/jm/hugo-site/public
+site_url: https://www.arleo.eu
+site_name: arleo.eu
+language_default: fr
+
+limits:
+  max_index_entries: 5000
+  max_result_items: 50
+  max_request_bytes: 1048576
+  max_response_bytes: 1048576
+
+security:
+  reject_symlinks: true
+  reject_path_traversal: true
+  reject_hidden_paths: true
+  allow_request_disk_access: false
+
+proxy:
+  enabled: true
+  public_host: mcp.arleo.eu
+  rate_limit: true
+
