@@ -54,6 +54,7 @@ The binary reads its YAML config from `HUGO_PUBLIC_MCP_CONFIG` and supports `std
 - `docs/mvp-validation.md`
 - `docs/security-tests.md`
 - `docs/go-interfaces.md`
+- `docs/deployment-pattern.md`
 - `docs/release-readiness.md`
 
 ## Development
