@@ -1,0 +1,28 @@
+http:
+  routers:
+    hugo-public-mcp:
+      rule: Host(`mcp.example.com`)
+      entryPoints:
+        - websecure
+      tls: {}
+      service: hugo-public-mcp
+      middlewares:
+        - hugo-public-mcp-headers
+        - hugo-public-mcp-buffering
+
+  middlewares:
+    hugo-public-mcp-headers:
+      headers:
+        customRequestHeaders:
+          X-Forwarded-Proto: https
+    hugo-public-mcp-buffering:
+      buffering:
+        maxRequestBodyBytes: 1048576
+        maxResponseBodyBytes: 1048576
+
+  services:
+    hugo-public-mcp:
+      loadBalancer:
+        passHostHeader: true
+        servers:
+          - url: http://127.0.0.1:8088

@@ -2,6 +2,10 @@ site_root: /home/jm/hugo-site/public
 site_url: https://www.arleo.eu
 site_name: arleo.eu
 language_default: fr
+transport: http
+http_bind_addr: 127.0.0.1
+http_bind_port: 8088
+streaming_enabled: true
 
 limits:
   max_index_entries: 5000
@@ -18,5 +22,3 @@ security:
 proxy:
   enabled: true
   public_host: mcp.arleo.eu
-  rate_limit: true
-

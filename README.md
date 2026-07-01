@@ -1,8 +1,8 @@
 # hugo-public-mcp
 
-`hugo-public-mcp` is a read-only MCP server for static Hugo sites.
+`hugo-public-mcp` is a strict read-only MCP server for published Hugo sites.
 
-It indexes a published `public/` directory at startup and exposes only safe discovery and read APIs for agents:
+It builds an in-memory index from a Hugo `public/` tree at startup and exposes only safe discovery and read tools:
 
 - `list_pages`
 - `get_page`
@@ -14,9 +14,22 @@ It indexes a published `public/` directory at startup and exposes only safe disc
 - `get_feed`
 - `get_site_information`
 
+## Current status
+
+This repository is at release-candidate quality for the MVP scope:
+
+- startup indexing from `public/`
+- read-only MCP tools
+- request-path validation
+- symlink and traversal rejection
+- security-oriented HTTP transport guards
+- unit, integration, and scale tests
+- CI and lint configuration
+- deployment examples for systemd, nginx/openresty, Caddy, Traefik, and Cloudflare
+
 ## Security posture
 
-This project is intentionally narrow:
+The public server is intentionally narrow:
 
 - read-only strict
 - no shell
@@ -27,13 +40,36 @@ This project is intentionally narrow:
 - no draft content
 - no runtime HTML scraping for search
 - no disk access during requests when the in-memory index is sufficient
+- no mutation-capable MCP tools
+
+## Configuration
+
+See `examples/arleo.eu/config.example.yaml` for a concrete published-site example.
+The binary reads its YAML config from `HUGO_PUBLIC_MCP_CONFIG` and supports `stdio` or `http` transport.
+
+## Documentation
+
+- `docs/architecture.md`
+- `docs/threat-model.md`
+- `docs/mvp-validation.md`
+- `docs/security-tests.md`
+- `docs/go-interfaces.md`
+- `docs/release-readiness.md`
+
+## Development
+
+Run the test suite:
+
+```bash
+go test ./...
+```
+
+Run lint:
+
+```bash
+golangci-lint run ./...
+```
 
 ## Project goal
 
 Provide a reusable, secure, Hugo-oriented MCP surface that improves agent discoverability and content reading without creating an execution platform.
-
-## Repository status
-
-This repository currently contains the MVP design documents only.
-Implementation comes after design review and validation.
-

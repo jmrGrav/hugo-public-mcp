@@ -41,8 +41,11 @@ The MVP is valid when all of the following are true:
 ## Recommended test flow
 
 1. Start the service against a fixture Hugo `public/` tree.
-2. Run the security tests.
-3. Run the MCP tool tests.
-4. Run proxy-level validation with HTTPS in front.
-5. Validate a real Hugo site such as `arleo.eu` as a configuration example only.
-
+2. Run `go test ./...`.
+3. Run `go test -race ./...`.
+4. Run `go vet ./...`.
+5. Run `golangci-lint run ./...`.
+6. Run the security tests.
+7. Run the MCP tool tests.
+8. Run proxy-level validation with HTTPS in front.
+9. Validate a real Hugo site such as `arleo.eu` as a configuration example only.
