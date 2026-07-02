@@ -18,7 +18,7 @@ func htmlBodyToMarkdown(body *html.Node) string {
 		return ""
 	}
 	var b strings.Builder
-	walkMarkdown(&b, body, 0)
+	walkMarkdown(&b, body)
 	result := strings.TrimSpace(b.String())
 	if len(result) > maxMarkdownBytes {
 		result = result[:maxMarkdownBytes] + "\n\n[truncated]"
@@ -26,7 +26,7 @@ func htmlBodyToMarkdown(body *html.Node) string {
 	return result
 }
 
-func walkMarkdown(b *strings.Builder, n *html.Node, olIndex int) {
+func walkMarkdown(b *strings.Builder, n *html.Node) {
 	if n == nil {
 		return
 	}
@@ -40,14 +40,14 @@ func walkMarkdown(b *strings.Builder, n *html.Node, olIndex int) {
 			level := int(n.Data[1] - '0')
 			b.WriteString("\n\n" + strings.Repeat("#", level) + " ")
 			for c := n.FirstChild; c != nil; c = c.NextSibling {
-				walkMarkdown(b, c, 0)
+				walkMarkdown(b, c)
 			}
 			b.WriteString("\n\n")
 			return
 		case "p":
 			b.WriteString("\n\n")
 			for c := n.FirstChild; c != nil; c = c.NextSibling {
-				walkMarkdown(b, c, 0)
+				walkMarkdown(b, c)
 			}
 			b.WriteString("\n\n")
 			return
@@ -57,34 +57,34 @@ func walkMarkdown(b *strings.Builder, n *html.Node, olIndex int) {
 		case "strong", "b":
 			b.WriteString("**")
 			for c := n.FirstChild; c != nil; c = c.NextSibling {
-				walkMarkdown(b, c, 0)
+				walkMarkdown(b, c)
 			}
 			b.WriteString("**")
 			return
 		case "em", "i":
 			b.WriteString("*")
 			for c := n.FirstChild; c != nil; c = c.NextSibling {
-				walkMarkdown(b, c, 0)
+				walkMarkdown(b, c)
 			}
 			b.WriteString("*")
 			return
 		case "code":
 			if n.Parent != nil && n.Parent.Data == "pre" {
 				for c := n.FirstChild; c != nil; c = c.NextSibling {
-					walkMarkdown(b, c, 0)
+					walkMarkdown(b, c)
 				}
 				return
 			}
 			b.WriteString("`")
 			for c := n.FirstChild; c != nil; c = c.NextSibling {
-				walkMarkdown(b, c, 0)
+				walkMarkdown(b, c)
 			}
 			b.WriteString("`")
 			return
 		case "pre":
 			b.WriteString("\n\n```\n")
 			for c := n.FirstChild; c != nil; c = c.NextSibling {
-				walkMarkdown(b, c, 0)
+				walkMarkdown(b, c)
 			}
 			b.WriteString("\n```\n\n")
 			return
@@ -92,7 +92,7 @@ func walkMarkdown(b *strings.Builder, n *html.Node, olIndex int) {
 			href := attr(n, "href")
 			b.WriteString("[")
 			for c := n.FirstChild; c != nil; c = c.NextSibling {
-				walkMarkdown(b, c, 0)
+				walkMarkdown(b, c)
 			}
 			b.WriteString("](" + href + ")")
 			return
@@ -102,7 +102,7 @@ func walkMarkdown(b *strings.Builder, n *html.Node, olIndex int) {
 				if c.Type == html.ElementNode && c.Data == "li" {
 					b.WriteString("- ")
 					for gc := c.FirstChild; gc != nil; gc = gc.NextSibling {
-						walkMarkdown(b, gc, 0)
+						walkMarkdown(b, gc)
 					}
 					b.WriteString("\n")
 				}
@@ -116,7 +116,7 @@ func walkMarkdown(b *strings.Builder, n *html.Node, olIndex int) {
 				if c.Type == html.ElementNode && c.Data == "li" {
 					b.WriteString(fmt.Sprintf("%d. ", idx))
 					for gc := c.FirstChild; gc != nil; gc = gc.NextSibling {
-						walkMarkdown(b, gc, 0)
+						walkMarkdown(b, gc)
 					}
 					b.WriteString("\n")
 					idx++
@@ -127,7 +127,7 @@ func walkMarkdown(b *strings.Builder, n *html.Node, olIndex int) {
 		case "blockquote":
 			b.WriteString("\n\n> ")
 			for c := n.FirstChild; c != nil; c = c.NextSibling {
-				walkMarkdown(b, c, 0)
+				walkMarkdown(b, c)
 			}
 			b.WriteString("\n\n")
 			return
@@ -139,6 +139,6 @@ func walkMarkdown(b *strings.Builder, n *html.Node, olIndex int) {
 		}
 	}
 	for c := n.FirstChild; c != nil; c = c.NextSibling {
-		walkMarkdown(b, c, 0)
+		walkMarkdown(b, c)
 	}
 }
