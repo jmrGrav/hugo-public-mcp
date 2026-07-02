@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -26,7 +27,14 @@ type Config struct {
 }
 
 type OAuthConfig struct {
-	Enabled bool `yaml:"enabled"`
+	Enabled               bool     `yaml:"enabled"`
+	Issuer                string   `yaml:"issuer"`
+	Resource              string   `yaml:"resource"`
+	DynamicClientEnabled  bool     `yaml:"dynamic_client_registration"`
+	RequirePKCE           bool     `yaml:"require_pkce"`
+	TrustedAuthorizeCIDRs []string `yaml:"trusted_authorize_cidrs"`
+	AuthCodeTTLSeconds    int      `yaml:"auth_code_ttl_seconds"`
+	AccessTokenTTLSeconds int      `yaml:"access_token_ttl_seconds"`
 }
 
 func Default() Config {
@@ -84,6 +92,31 @@ func applyEnv(cfg *Config) {
 	if v := strings.TrimSpace(os.Getenv("HUGO_PUBLIC_MCP_OAUTH_ENABLED")); v != "" {
 		cfg.OAuth.Enabled = parseBool(v)
 	}
+	if v := strings.TrimSpace(os.Getenv("HUGO_PUBLIC_MCP_OAUTH_ISSUER")); v != "" {
+		cfg.OAuth.Issuer = v
+	}
+	if v := strings.TrimSpace(os.Getenv("HUGO_PUBLIC_MCP_OAUTH_RESOURCE")); v != "" {
+		cfg.OAuth.Resource = v
+	}
+	if v := strings.TrimSpace(os.Getenv("HUGO_PUBLIC_MCP_OAUTH_DYNAMIC_CLIENT_REGISTRATION")); v != "" {
+		cfg.OAuth.DynamicClientEnabled = parseBool(v)
+	}
+	if v := strings.TrimSpace(os.Getenv("HUGO_PUBLIC_MCP_OAUTH_REQUIRE_PKCE")); v != "" {
+		cfg.OAuth.RequirePKCE = parseBool(v)
+	}
+	if v := strings.TrimSpace(os.Getenv("HUGO_PUBLIC_MCP_OAUTH_TRUSTED_AUTHORIZE_CIDRS")); v != "" {
+		cfg.OAuth.TrustedAuthorizeCIDRs = splitCSV(v)
+	}
+	if v := strings.TrimSpace(os.Getenv("HUGO_PUBLIC_MCP_OAUTH_AUTH_CODE_TTL_SECONDS")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil {
+			cfg.OAuth.AuthCodeTTLSeconds = parsed
+		}
+	}
+	if v := strings.TrimSpace(os.Getenv("HUGO_PUBLIC_MCP_OAUTH_ACCESS_TOKEN_TTL_SECONDS")); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil {
+			cfg.OAuth.AccessTokenTTLSeconds = parsed
+		}
+	}
 }
 
 func (c *Config) Validate() error {
@@ -111,9 +144,37 @@ func (c *Config) Validate() error {
 	if c.Transport != "stdio" && c.Transport != "http" {
 		return fmt.Errorf("transport must be stdio or http")
 	}
+	if c.OAuth.Enabled {
+		if c.OAuth.AuthCodeTTLSeconds <= 0 {
+			c.OAuth.AuthCodeTTLSeconds = 300
+		}
+		if c.OAuth.AccessTokenTTLSeconds <= 0 {
+			c.OAuth.AccessTokenTTLSeconds = 3600
+		}
+		if len(c.OAuth.TrustedAuthorizeCIDRs) == 0 {
+			c.OAuth.TrustedAuthorizeCIDRs = []string{"127.0.0.1/32", "::1/128"}
+		}
+		if !c.OAuth.DynamicClientEnabled {
+			c.OAuth.DynamicClientEnabled = true
+		}
+		if !c.OAuth.RequirePKCE {
+			c.OAuth.RequirePKCE = true
+		}
+	}
 	return nil
 }
 
 func parseBool(v string) bool {
 	return strings.EqualFold(v, "true") || v == "1" || strings.EqualFold(v, "yes")
+}
+
+func splitCSV(v string) []string {
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if cleaned := strings.TrimSpace(part); cleaned != "" {
+			out = append(out, cleaned)
+		}
+	}
+	return out
 }

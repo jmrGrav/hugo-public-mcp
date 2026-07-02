@@ -7,11 +7,14 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/jmrGrav/hugo-public-mcp/internal/config"
+	"github.com/jmrGrav/hugo-public-mcp/internal/oauth"
 	"github.com/jmrGrav/hugo-public-mcp/internal/observability"
 	"github.com/jmrGrav/hugo-public-mcp/internal/publicmcp"
 	"github.com/jmrGrav/hugo-public-mcp/internal/site"
@@ -27,6 +30,7 @@ type Service struct {
 	cfg    config.Config
 	index  *site.Index
 	server *mcp.Server
+	oauth  *oauth.Service
 }
 
 func New(cfg config.Config) (*Service, error) {
@@ -46,7 +50,11 @@ func New(cfg config.Config) (*Service, error) {
 	}
 	srv := mcp.NewServer(&mcp.Implementation{Name: Name, Version: Version}, nil)
 	publicmcp.Register(srv, publicmcp.Dependencies{Index: index})
-	return &Service{cfg: cfg, index: index, server: srv}, nil
+	svc := &Service{cfg: cfg, index: index, server: srv}
+	if cfg.OAuth.Enabled {
+		svc.oauth = oauth.NewService(svc.oauthConfigForRequest(nil))
+	}
+	return svc, nil
 }
 
 func (s *Service) MCP() *mcp.Server {
@@ -117,6 +125,149 @@ func (s *Service) httpHandler(logger *slog.Logger) http.Handler {
 			)
 		}()
 		switch r.URL.Path {
+		case "/.well-known/oauth-authorization-server":
+			if !s.cfg.OAuth.Enabled || s.oauth == nil {
+				status = http.StatusNotFound
+				http.NotFound(w, r)
+				return
+			}
+			if r.Method != http.MethodGet && r.Method != http.MethodHead {
+				status = http.StatusMethodNotAllowed
+				w.Header().Set("Allow", http.MethodGet+", "+http.MethodHead)
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.Header().Set("Cache-Control", "public, max-age=300")
+			w.WriteHeader(http.StatusOK)
+			if r.Method == http.MethodHead {
+				return
+			}
+			_ = json.NewEncoder(w).Encode(s.oauthForRequest(r).AuthorizationServerMetadata())
+			return
+		case "/.well-known/oauth-protected-resource":
+			if !s.cfg.OAuth.Enabled || s.oauth == nil {
+				status = http.StatusNotFound
+				http.NotFound(w, r)
+				return
+			}
+			if r.Method != http.MethodGet && r.Method != http.MethodHead {
+				status = http.StatusMethodNotAllowed
+				w.Header().Set("Allow", http.MethodGet+", "+http.MethodHead)
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.Header().Set("Cache-Control", "public, max-age=300")
+			w.WriteHeader(http.StatusOK)
+			if r.Method == http.MethodHead {
+				return
+			}
+			_ = json.NewEncoder(w).Encode(s.oauthForRequest(r).ProtectedResourceMetadata())
+			return
+		case "/register":
+			if !s.cfg.OAuth.Enabled || s.oauth == nil {
+				status = http.StatusNotFound
+				http.NotFound(w, r)
+				return
+			}
+			if r.Method != http.MethodPost {
+				status = http.StatusMethodNotAllowed
+				w.Header().Set("Allow", http.MethodPost)
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			var req oauth.RegistrationRequest
+			if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, s.cfg.MaxRequestBytes)).Decode(&req); err != nil {
+				status = http.StatusBadRequest
+				writeOAuthError(w, "invalid_request", http.StatusBadRequest)
+				return
+			}
+			resp, err := s.oauth.RegisterClient(req)
+			if err != nil {
+				status = http.StatusBadRequest
+				writeOAuthError(w, "invalid_redirect_uri", http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(resp)
+			return
+		case "/authorize":
+			if !s.cfg.OAuth.Enabled || s.oauth == nil {
+				status = http.StatusNotFound
+				http.NotFound(w, r)
+				return
+			}
+			if r.Method != http.MethodGet {
+				status = http.StatusMethodNotAllowed
+				w.Header().Set("Allow", http.MethodGet)
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			q := r.URL.Query()
+			redirectURI := q.Get("redirect_uri")
+			code, err := s.oauth.IssueAuthCode(oauth.AuthorizeRequest{
+				SourceIP:            requestSourceIP(r),
+				ResponseType:        q.Get("response_type"),
+				ClientID:            q.Get("client_id"),
+				RedirectURI:         redirectURI,
+				State:               q.Get("state"),
+				CodeChallenge:       q.Get("code_challenge"),
+				CodeChallengeMethod: q.Get("code_challenge_method"),
+			})
+			if err != nil {
+				status = oauthAuthorizeErrorStatus(err)
+				if redirectURI == "" || strings.Contains(err.Error(), "invalid_redirect_uri") || strings.Contains(err.Error(), "unauthorized_client") || strings.Contains(err.Error(), "access_denied") {
+					http.Error(w, oauthAuthorizeErrorCode(err), status)
+					return
+				}
+				params := url.Values{}
+				params.Set("error", oauthAuthorizeErrorCode(err))
+				if state := q.Get("state"); state != "" {
+					params.Set("state", state)
+				}
+				http.Redirect(w, r, redirectURI+"?"+params.Encode(), http.StatusFound)
+				return
+			}
+			params := url.Values{"code": {code}}
+			if state := q.Get("state"); state != "" {
+				params.Set("state", state)
+			}
+			http.Redirect(w, r, redirectURI+"?"+params.Encode(), http.StatusFound)
+			return
+		case "/token":
+			if !s.cfg.OAuth.Enabled || s.oauth == nil {
+				status = http.StatusNotFound
+				http.NotFound(w, r)
+				return
+			}
+			if r.Method != http.MethodPost {
+				status = http.StatusMethodNotAllowed
+				w.Header().Set("Allow", http.MethodPost)
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			if err := r.ParseForm(); err != nil {
+				status = http.StatusBadRequest
+				writeOAuthError(w, "invalid_request", http.StatusBadRequest)
+				return
+			}
+			resp, err := s.oauth.ExchangeToken(oauth.TokenExchangeRequest{
+				GrantType:    r.FormValue("grant_type"),
+				ClientID:     r.FormValue("client_id"),
+				RedirectURI:  r.FormValue("redirect_uri"),
+				Code:         r.FormValue("code"),
+				CodeVerifier: r.FormValue("code_verifier"),
+			})
+			if err != nil {
+				status = oauthTokenErrorStatus(err)
+				writeOAuthError(w, oauthTokenErrorCode(err), status)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			_ = json.NewEncoder(w).Encode(resp)
+			return
 		case "/health":
 			if r.Method != http.MethodGet && r.Method != http.MethodHead {
 				status = http.StatusMethodNotAllowed
@@ -197,6 +348,17 @@ func (s *Service) httpHandler(logger *slog.Logger) http.Handler {
 				http.Error(w, "request too large", http.StatusRequestEntityTooLarge)
 				return
 			}
+			if s.cfg.OAuth.Enabled && s.oauth != nil {
+				auth := strings.TrimSpace(r.Header.Get("Authorization"))
+				if auth != "" {
+					if !strings.HasPrefix(auth, "Bearer ") || !s.oauth.ValidateAccessToken(strings.TrimSpace(strings.TrimPrefix(auth, "Bearer "))) {
+						status = http.StatusUnauthorized
+						w.Header().Set("WWW-Authenticate", fmt.Sprintf("Bearer realm=%q, resource_metadata=%q", requestBaseURL(r), requestBaseURL(r)+"/.well-known/oauth-protected-resource"))
+						writeOAuthError(w, "invalid_token", http.StatusUnauthorized)
+						return
+					}
+				}
+			}
 			r.Body = io.NopCloser(bytes.NewReader(body))
 			streaming.ServeHTTP(w, r)
 		case "/mcp/events":
@@ -214,6 +376,103 @@ func (s *Service) httpHandler(logger *slog.Logger) http.Handler {
 			http.NotFound(w, r)
 		}
 	})
+}
+
+func (s *Service) oauthForRequest(r *http.Request) *oauth.Service {
+	if s.oauth == nil {
+		return nil
+	}
+	cfg := s.oauthConfigForRequest(r)
+	if cfg.Issuer == s.oauth.AuthorizationServerMetadata()["issuer"] {
+		return s.oauth
+	}
+	return oauth.NewService(cfg)
+}
+
+func (s *Service) oauthConfigForRequest(r *http.Request) oauth.Config {
+	base := requestBaseURL(r)
+	issuer := strings.TrimRight(s.cfg.OAuth.Issuer, "/")
+	if issuer == "" {
+		issuer = base
+	}
+	resource := strings.TrimSpace(s.cfg.OAuth.Resource)
+	if resource == "" {
+		resource = issuer + "/mcp"
+	}
+	return oauth.Config{
+		Issuer:                issuer,
+		Resource:              resource,
+		AuthCodeTTLSeconds:    s.cfg.OAuth.AuthCodeTTLSeconds,
+		AccessTokenTTLSeconds: s.cfg.OAuth.AccessTokenTTLSeconds,
+		TrustedAuthorizeCIDRs: s.cfg.OAuth.TrustedAuthorizeCIDRs,
+		RequirePKCE:           s.cfg.OAuth.RequirePKCE,
+		DynamicClientEnabled:  s.cfg.OAuth.DynamicClientEnabled,
+		SupportedScopes:       []string{"mcp"},
+	}
+}
+
+func requestSourceIP(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	host := r.RemoteAddr
+	if strings.Contains(host, ":") {
+		if splitHost, _, err := net.SplitHostPort(host); err == nil {
+			host = splitHost
+		}
+	}
+	return host
+}
+
+func writeOAuthError(w http.ResponseWriter, code string, status int) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": code})
+}
+
+func oauthAuthorizeErrorCode(err error) string {
+	msg := err.Error()
+	switch {
+	case strings.HasPrefix(msg, "unsupported_response_type"):
+		return "unsupported_response_type"
+	case strings.HasPrefix(msg, "access_denied"):
+		return "access_denied"
+	case strings.HasPrefix(msg, "unauthorized_client"):
+		return "unauthorized_client"
+	default:
+		return "invalid_request"
+	}
+}
+
+func oauthAuthorizeErrorStatus(err error) int {
+	if strings.HasPrefix(err.Error(), "access_denied") {
+		return http.StatusForbidden
+	}
+	if strings.HasPrefix(err.Error(), "unauthorized_client") {
+		return http.StatusUnauthorized
+	}
+	return http.StatusBadRequest
+}
+
+func oauthTokenErrorCode(err error) string {
+	msg := err.Error()
+	switch {
+	case strings.HasPrefix(msg, "unsupported_grant_type"):
+		return "unsupported_grant_type"
+	case strings.HasPrefix(msg, "invalid_client"):
+		return "invalid_client"
+	case strings.HasPrefix(msg, "invalid_grant"):
+		return "invalid_grant"
+	default:
+		return "invalid_request"
+	}
+}
+
+func oauthTokenErrorStatus(err error) int {
+	if strings.HasPrefix(err.Error(), "invalid_client") {
+		return http.StatusUnauthorized
+	}
+	return http.StatusBadRequest
 }
 
 func (s *Service) servePublishedResource(w http.ResponseWriter, r *http.Request) bool {

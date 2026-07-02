@@ -8,9 +8,18 @@ http_bind_port: 8088
 streaming_enabled: true
 
 oauth:
-  # Disabled by default. Do not enable until real OAuth endpoints, token storage,
-  # ACL tests, and staging validation are complete.
+  # Disabled by default. Enable only for staging until durable token/client
+  # storage and production validation are complete.
   enabled: false
+  issuer: https://mcp.arleo.eu
+  resource: https://mcp.arleo.eu/mcp
+  dynamic_client_registration: true
+  require_pkce: true
+  trusted_authorize_cidrs:
+    - 127.0.0.1/32
+    - ::1/128
+  auth_code_ttl_seconds: 300
+  access_token_ttl_seconds: 3600
 
 limits:
   max_index_entries: 5000

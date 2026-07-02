@@ -32,6 +32,11 @@ oauth:
 
 func TestLoadOAuthEnabledFromEnv(t *testing.T) {
 	t.Setenv("HUGO_PUBLIC_MCP_OAUTH_ENABLED", "true")
+	t.Setenv("HUGO_PUBLIC_MCP_OAUTH_DYNAMIC_CLIENT_REGISTRATION", "true")
+	t.Setenv("HUGO_PUBLIC_MCP_OAUTH_REQUIRE_PKCE", "true")
+	t.Setenv("HUGO_PUBLIC_MCP_OAUTH_TRUSTED_AUTHORIZE_CIDRS", "127.0.0.1/32,::1/128")
+	t.Setenv("HUGO_PUBLIC_MCP_OAUTH_AUTH_CODE_TTL_SECONDS", "123")
+	t.Setenv("HUGO_PUBLIC_MCP_OAUTH_ACCESS_TOKEN_TTL_SECONDS", "456")
 
 	cfg, err := Load(writeTempConfig(t, `site_root: /tmp/public`))
 	if err != nil {
@@ -39,6 +44,15 @@ func TestLoadOAuthEnabledFromEnv(t *testing.T) {
 	}
 	if !cfg.OAuth.Enabled {
 		t.Fatal("expected OAuth enabled from HUGO_PUBLIC_MCP_OAUTH_ENABLED")
+	}
+	if !cfg.OAuth.DynamicClientEnabled || !cfg.OAuth.RequirePKCE {
+		t.Fatalf("expected OAuth boolean env flags enabled: %#v", cfg.OAuth)
+	}
+	if got := cfg.OAuth.TrustedAuthorizeCIDRs; len(got) != 2 || got[0] != "127.0.0.1/32" || got[1] != "::1/128" {
+		t.Fatalf("unexpected trusted authorize CIDRs: %#v", got)
+	}
+	if cfg.OAuth.AuthCodeTTLSeconds != 123 || cfg.OAuth.AccessTokenTTLSeconds != 456 {
+		t.Fatalf("unexpected OAuth TTLs: %#v", cfg.OAuth)
 	}
 }
 
