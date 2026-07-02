@@ -441,3 +441,211 @@ func TestRunStdioRejectsNilService(t *testing.T) {
 		t.Fatal("RunStdio() expected error for nil service")
 	}
 }
+
+// helpers needed by new tests
+func mustTestServiceOAuth(t *testing.T) *Service {
+	t.Helper()
+	svc := mustTestService(t, true)
+	svc.cfg.OAuth = config.OAuthConfig{
+		Enabled:               true,
+		DynamicClientEnabled:  true,
+		RequirePKCE:           true,
+		TrustedAuthorizeCIDRs: []string{"192.0.2.10/32"},
+		AuthCodeTTLSeconds:    300,
+		AccessTokenTTLSeconds: 3600,
+	}
+	req := httptest.NewRequest(http.MethodGet, "https://mcp.example.test/", nil)
+	svc.oauth = oauth.NewService(svc.oauthConfigForRequest(req))
+	// rebuild with fullServer
+	if err := svc.initFullServer(); err != nil {
+		t.Fatalf("initFullServer: %v", err)
+	}
+	return svc
+}
+
+func obtainValidToken(t *testing.T, svc *Service) string {
+	t.Helper()
+	// DCR
+	regBody := []byte(`{"redirect_uris":["https://client.example.test/cb"]}`)
+	regReq := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(regBody))
+	regReq.Host = "mcp.example.test"
+	regReq.Header.Set("X-Forwarded-Proto", "https")
+	regReq.Header.Set("Content-Type", "application/json")
+	regRec := httptest.NewRecorder()
+	svc.HTTPHandler().ServeHTTP(regRec, regReq)
+	if regRec.Code != http.StatusCreated {
+		t.Fatalf("register status = %d", regRec.Code)
+	}
+	var reg struct{ ClientID string `json:"client_id"` }
+	if err := json.Unmarshal(regRec.Body.Bytes(), &reg); err != nil {
+		t.Fatalf("register JSON: %v", err)
+	}
+
+	// authorize
+	verifier := "test-verifier-test-verifier-test-verifier"
+	challenge := oauth.CodeChallengeS256(verifier)
+	authURL := "/authorize?" + url.Values{
+		"response_type": {"code"}, "client_id": {reg.ClientID},
+		"redirect_uri": {"https://client.example.test/cb"}, "state": {"s1"},
+		"code_challenge": {challenge}, "code_challenge_method": {"S256"},
+	}.Encode()
+	authReq := httptest.NewRequest(http.MethodGet, authURL, nil)
+	authReq.RemoteAddr = "192.0.2.10:1234"
+	authReq.Host = "mcp.example.test"
+	authReq.Header.Set("X-Forwarded-Proto", "https")
+	authRec := httptest.NewRecorder()
+	svc.HTTPHandler().ServeHTTP(authRec, authReq)
+	if authRec.Code != http.StatusFound {
+		t.Fatalf("authorize status = %d", authRec.Code)
+	}
+	loc, _ := url.Parse(authRec.Header().Get("Location"))
+	code := loc.Query().Get("code")
+
+	// token
+	tokenForm := url.Values{
+		"grant_type": {"authorization_code"}, "client_id": {reg.ClientID},
+		"code": {code}, "redirect_uri": {"https://client.example.test/cb"},
+		"code_verifier": {verifier},
+	}
+	tokReq := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader(tokenForm.Encode()))
+	tokReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	tokRec := httptest.NewRecorder()
+	svc.HTTPHandler().ServeHTTP(tokRec, tokReq)
+	if tokRec.Code != http.StatusOK {
+		t.Fatalf("token status = %d body = %q", tokRec.Code, tokRec.Body.String())
+	}
+	var tok struct{ AccessToken string `json:"access_token"` }
+	if err := json.Unmarshal(tokRec.Body.Bytes(), &tok); err != nil {
+		t.Fatalf("token JSON: %v", err)
+	}
+	return tok.AccessToken
+}
+
+func TestPrivateToolHiddenWithoutBearer(t *testing.T) {
+	svc := mustTestServiceOAuth(t)
+
+	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
+	req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	rec := httptest.NewRecorder()
+	svc.HTTPHandler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d want 200", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "get_full_page_markdown") {
+		t.Error("get_full_page_markdown must not appear in tools/list without bearer")
+	}
+}
+
+func TestPrivateToolVisibleWithValidBearer(t *testing.T) {
+	svc := mustTestServiceOAuth(t)
+	token := obtainValidToken(t, svc)
+
+	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
+	req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	svc.HTTPHandler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d want 200 body = %q", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "get_full_page_markdown") {
+		t.Error("get_full_page_markdown must appear in tools/list with valid bearer")
+	}
+}
+
+func TestPrivateToolCallForbiddenWithoutBearer(t *testing.T) {
+	svc := mustTestServiceOAuth(t)
+
+	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_full_page_markdown","arguments":{"slug":"/posts/hello"}}}`)
+	req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	svc.HTTPHandler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status = %d want 403", rec.Code)
+	}
+}
+
+func TestPrivateToolCallSucceedsWithValidBearer(t *testing.T) {
+	svc := mustTestServiceOAuth(t)
+	token := obtainValidToken(t, svc)
+
+	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_full_page_markdown","arguments":{"slug":"/posts/hello"}}}`)
+	req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Host = "mcp.example.test"
+	req.Header.Set("X-Forwarded-Proto", "https")
+	rec := httptest.NewRecorder()
+	svc.HTTPHandler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d want 200 body = %q", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "Hello") {
+		t.Errorf("response missing page content: %q", rec.Body.String())
+	}
+}
+
+func TestPrivateToolCallUnknownSlugWithBearer(t *testing.T) {
+	svc := mustTestServiceOAuth(t)
+	token := obtainValidToken(t, svc)
+
+	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_full_page_markdown","arguments":{"slug":"/posts/no-such-page"}}}`)
+	req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	svc.HTTPHandler().ServeHTTP(rec, req)
+
+	// MCP returns 200 with isError=true in the body (tool-level error, not HTTP error)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d want 200 (tool errors are in MCP body)", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "error") && !strings.Contains(rec.Body.String(), "not found") {
+		t.Errorf("expected tool error in body: %q", rec.Body.String())
+	}
+}
+
+func TestPrivateToolPathTraversalRejected(t *testing.T) {
+	svc := mustTestServiceOAuth(t)
+	token := obtainValidToken(t, svc)
+
+	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_full_page_markdown","arguments":{"slug":"../../../etc/passwd"}}}`)
+	req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set("Authorization", "Bearer "+token)
+	rec := httptest.NewRecorder()
+	svc.HTTPHandler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d want 200 (slug validation error in MCP body)", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "passwd") {
+		t.Error("response must not contain etc/passwd content")
+	}
+}
+
+func TestAnonymousPublicToolsStillWorkWithOAuth(t *testing.T) {
+	svc := mustTestServiceOAuth(t)
+
+	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_site_information","arguments":{}}}`)
+	req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	svc.HTTPHandler().ServeHTTP(rec, req)
+
+	if rec.Code == http.StatusUnauthorized || rec.Code == http.StatusForbidden {
+		t.Fatalf("anonymous public tool must work with OAuth enabled, got %d", rec.Code)
+	}
+}

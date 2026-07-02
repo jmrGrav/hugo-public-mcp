@@ -39,10 +39,11 @@ var publicToolNames = map[string]struct{}{
 }
 
 type Service struct {
-	cfg    config.Config
-	index  *site.Index
-	server *mcp.Server
-	oauth  *oauth.Service
+	cfg        config.Config
+	index      *site.Index
+	server     *mcp.Server
+	fullServer *mcp.Server
+	oauth      *oauth.Service
 }
 
 func New(cfg config.Config) (*Service, error) {
@@ -65,8 +66,24 @@ func New(cfg config.Config) (*Service, error) {
 	svc := &Service{cfg: cfg, index: index, server: srv}
 	if cfg.OAuth.Enabled {
 		svc.oauth = oauth.NewService(svc.oauthConfigForRequest(nil))
+		if err := svc.initFullServer(); err != nil {
+			return nil, err
+		}
 	}
 	return svc, nil
+}
+
+// initFullServer creates the OAuth-gated MCP server with public + private tools.
+// Called from New() when OAuth.Enabled, and from tests to re-init after config change.
+func (s *Service) initFullServer() error {
+	if s == nil || !s.cfg.OAuth.Enabled {
+		return nil
+	}
+	full := mcp.NewServer(&mcp.Implementation{Name: Name, Version: Version}, nil)
+	publicmcp.Register(full, publicmcp.Dependencies{Index: s.index})
+	publicmcp.RegisterPrivate(full, publicmcp.Dependencies{Index: s.index})
+	s.fullServer = full
+	return nil
 }
 
 func (s *Service) MCP() *mcp.Server {
@@ -119,12 +136,19 @@ func (s *Service) httpHandler(logger *slog.Logger) http.Handler {
 	if logger == nil {
 		logger = observability.New()
 	}
-	streaming := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
-		return s.server
-	}, &mcp.StreamableHTTPOptions{
+	opts := &mcp.StreamableHTTPOptions{
 		Stateless:                  true,
 		DisableLocalhostProtection: true,
-	})
+	}
+	streaming := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
+		return s.server
+	}, opts)
+	var fullStreaming http.Handler
+	if s.fullServer != nil {
+		fullStreaming = mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
+			return s.fullServer
+		}, opts)
+	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		status := http.StatusOK
@@ -327,7 +351,7 @@ func (s *Service) httpHandler(logger *slog.Logger) http.Handler {
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 				return
 			}
-			card := buildDiscoveryCard(r)
+			card := s.buildDiscoveryCard(r)
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.Header().Set("Cache-Control", "public, max-age=300")
 			w.WriteHeader(http.StatusOK)
@@ -369,7 +393,16 @@ func (s *Service) httpHandler(logger *slog.Logger) http.Handler {
 						writeOAuthError(w, "invalid_token", http.StatusUnauthorized)
 						return
 					}
+					// Valid bearer: route to fullServer (public + private tools)
+					r.Body = io.NopCloser(bytes.NewReader(body))
+					if fullStreaming != nil {
+						fullStreaming.ServeHTTP(w, r)
+					} else {
+						streaming.ServeHTTP(w, r)
+					}
+					return
 				}
+				// No bearer: block calls to private tools before MCP dispatch
 				if containsForbiddenToolCall(body) {
 					status = http.StatusForbidden
 					w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -572,44 +605,42 @@ func containsJSON(v string) bool {
 }
 
 type serverCard struct {
-	Name        string            `json:"name"`
-	Version     string            `json:"version"`
-	Description string            `json:"description"`
-	Endpoint    string            `json:"endpoint"`
-	Discovery   string            `json:"discovery"`
-	Transport   string            `json:"transport"`
-	Auth        string            `json:"auth"`
-	ReadOnly    bool              `json:"read_only"`
-	Tools       []string          `json:"tools"`
-	Metadata    map[string]string `json:"metadata,omitempty"`
+	Name               string            `json:"name"`
+	Version            string            `json:"version"`
+	Description        string            `json:"description"`
+	Endpoint           string            `json:"endpoint"`
+	Discovery          string            `json:"discovery"`
+	Transport          string            `json:"transport"`
+	Auth               string            `json:"auth"`
+	ReadOnly           bool              `json:"read_only"`
+	Tools              []string          `json:"tools"`
+	AuthenticatedTools []string          `json:"authenticated_tools,omitempty"`
+	Metadata           map[string]string `json:"metadata,omitempty"`
 }
 
-func buildDiscoveryCard(r *http.Request) serverCard {
+func (s *Service) buildDiscoveryCard(r *http.Request) serverCard {
 	base := requestBaseURL(r)
-	return serverCard{
+	card := serverCard{
 		Name:        Name,
 		Version:     Version,
 		Description: "Read-only MCP server for published Hugo sites.",
 		Endpoint:    base + "/mcp",
 		Discovery:   base + "/.well-known/mcp.json",
 		Transport:   "streamable-http",
-		Auth:        "none",
 		ReadOnly:    true,
 		Tools: []string{
-			"list_pages",
-			"get_page",
-			"search_pages",
-			"get_recent_posts",
-			"list_tags",
-			"list_categories",
-			"get_sitemap",
-			"get_feed",
-			"get_site_information",
+			"list_pages", "get_page", "search_pages", "get_recent_posts",
+			"list_tags", "list_categories", "get_sitemap", "get_feed", "get_site_information",
 		},
-		Metadata: map[string]string{
-			"scope": "public-read-only",
-		},
+		Metadata: map[string]string{"scope": "public-read-only"},
 	}
+	if s.cfg.OAuth.Enabled {
+		card.Auth = "oauth2-optional"
+		card.AuthenticatedTools = []string{"get_full_page_markdown"}
+	} else {
+		card.Auth = "none"
+	}
+	return card
 }
 
 func requestBaseURL(r *http.Request) string {
