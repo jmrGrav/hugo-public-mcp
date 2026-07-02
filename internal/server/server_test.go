@@ -55,6 +55,57 @@ func TestHTTPHandlerRejectsOversizeBody(t *testing.T) {
 	}
 }
 
+func TestHTTPHandlerOAuthDisabledBehaviorUnchanged(t *testing.T) {
+	svc := mustTestService(t, true)
+	if svc.cfg.OAuth.Enabled {
+		t.Fatal("test service must default oauth.enabled=false")
+	}
+
+	for _, path := range []string{
+		"/.well-known/oauth-authorization-server",
+		"/.well-known/oauth-protected-resource",
+		"/authorize",
+		"/token",
+		"/register",
+	} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			rec := httptest.NewRecorder()
+
+			svc.HTTPHandler().ServeHTTP(rec, req)
+
+			if rec.Code != http.StatusNotFound {
+				t.Fatalf("status = %d want %d", rec.Code, http.StatusNotFound)
+			}
+		})
+	}
+}
+
+func TestHTTPHandlerOAuthDisabledKeepsAnonymousReadOnlyMCP(t *testing.T) {
+	svc := mustTestService(t, true)
+
+	for _, auth := range []string{"", "Bearer invalid"} {
+		t.Run("authorization="+auth, func(t *testing.T) {
+			body := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
+			req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			if auth != "" {
+				req.Header.Set("Authorization", auth)
+			}
+			rec := httptest.NewRecorder()
+
+			svc.HTTPHandler().ServeHTTP(rec, req)
+
+			if rec.Code == http.StatusUnauthorized || rec.Code == http.StatusForbidden {
+				t.Fatalf("oauth.disabled must not enforce bearer auth, got %d", rec.Code)
+			}
+			if rec.Code < 200 || rec.Code >= 500 {
+				t.Fatalf("unexpected status = %d body = %q", rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestHTTPHandlerDisablesStreamingEndpointWhenConfigured(t *testing.T) {
 	svc := mustTestService(t, false)
 	req := httptest.NewRequest(http.MethodGet, "/mcp/events", nil)

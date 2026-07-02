@@ -9,19 +9,24 @@ import (
 )
 
 type Config struct {
-	SiteRoot         string `yaml:"site_root"`
-	SiteURL          string `yaml:"site_url"`
-	SiteName         string `yaml:"site_name"`
-	DefaultLanguage  string `yaml:"language_default"`
-	Transport        string `yaml:"transport"`
-	HTTPBindAddr     string `yaml:"http_bind_addr"`
-	HTTPBindPort     int    `yaml:"http_bind_port"`
-	StreamingEnabled bool   `yaml:"streaming_enabled"`
-	MaxIndexEntries  int    `yaml:"max_index_entries"`
-	MaxResultItems   int    `yaml:"max_result_items"`
-	MaxRequestBytes  int64  `yaml:"max_request_bytes"`
-	RejectSymlinks   bool   `yaml:"reject_symlinks"`
-	RejectHiddenPath bool   `yaml:"reject_hidden_paths"`
+	SiteRoot         string      `yaml:"site_root"`
+	SiteURL          string      `yaml:"site_url"`
+	SiteName         string      `yaml:"site_name"`
+	DefaultLanguage  string      `yaml:"language_default"`
+	Transport        string      `yaml:"transport"`
+	HTTPBindAddr     string      `yaml:"http_bind_addr"`
+	HTTPBindPort     int         `yaml:"http_bind_port"`
+	StreamingEnabled bool        `yaml:"streaming_enabled"`
+	MaxIndexEntries  int         `yaml:"max_index_entries"`
+	MaxResultItems   int         `yaml:"max_result_items"`
+	MaxRequestBytes  int64       `yaml:"max_request_bytes"`
+	RejectSymlinks   bool        `yaml:"reject_symlinks"`
+	RejectHiddenPath bool        `yaml:"reject_hidden_paths"`
+	OAuth            OAuthConfig `yaml:"oauth"`
+}
+
+type OAuthConfig struct {
+	Enabled bool `yaml:"enabled"`
 }
 
 func Default() Config {
@@ -76,6 +81,9 @@ func applyEnv(cfg *Config) {
 	if v := strings.TrimSpace(os.Getenv("HUGO_PUBLIC_MCP_STREAMING_ENABLED")); v != "" {
 		cfg.StreamingEnabled = strings.EqualFold(v, "true") || v == "1" || strings.EqualFold(v, "yes")
 	}
+	if v := strings.TrimSpace(os.Getenv("HUGO_PUBLIC_MCP_OAUTH_ENABLED")); v != "" {
+		cfg.OAuth.Enabled = parseBool(v)
+	}
 }
 
 func (c *Config) Validate() error {
@@ -104,4 +112,8 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("transport must be stdio or http")
 	}
 	return nil
+}
+
+func parseBool(v string) bool {
+	return strings.EqualFold(v, "true") || v == "1" || strings.EqualFold(v, "yes")
 }
