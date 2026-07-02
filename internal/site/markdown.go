@@ -114,7 +114,7 @@ func walkMarkdown(b *strings.Builder, n *html.Node) {
 			idx := 1
 			for c := n.FirstChild; c != nil; c = c.NextSibling {
 				if c.Type == html.ElementNode && c.Data == "li" {
-					b.WriteString(fmt.Sprintf("%d. ", idx))
+					fmt.Fprintf(b, "%d. ", idx)
 					for gc := c.FirstChild; gc != nil; gc = gc.NextSibling {
 						walkMarkdown(b, gc)
 					}

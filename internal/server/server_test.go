@@ -476,7 +476,9 @@ func obtainValidToken(t *testing.T, svc *Service) string {
 	if regRec.Code != http.StatusCreated {
 		t.Fatalf("register status = %d", regRec.Code)
 	}
-	var reg struct{ ClientID string `json:"client_id"` }
+	var reg struct {
+		ClientID string `json:"client_id"`
+	}
 	if err := json.Unmarshal(regRec.Body.Bytes(), &reg); err != nil {
 		t.Fatalf("register JSON: %v", err)
 	}
@@ -514,7 +516,9 @@ func obtainValidToken(t *testing.T, svc *Service) string {
 	if tokRec.Code != http.StatusOK {
 		t.Fatalf("token status = %d body = %q", tokRec.Code, tokRec.Body.String())
 	}
-	var tok struct{ AccessToken string `json:"access_token"` }
+	var tok struct {
+		AccessToken string `json:"access_token"`
+	}
 	if err := json.Unmarshal(tokRec.Body.Bytes(), &tok); err != nil {
 		t.Fatalf("token JSON: %v", err)
 	}
