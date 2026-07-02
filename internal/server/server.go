@@ -244,10 +244,11 @@ func (s *Service) httpHandler(logger *slog.Logger) http.Handler {
 			q := r.URL.Query()
 			clientID := q.Get("client_id")
 			redirectURI := q.Get("redirect_uri")
-			// Validate redirect_uri against registered client URIs before any redirect.
-			if !s.oauth.IsRegisteredRedirectURI(clientID, redirectURI) {
+			// Validate client + redirect_uri before any redirect so CodeQL can
+			// trace that the destination URI is never user-controlled past this point.
+			if err := s.oauth.ValidateClientRedirect(clientID, redirectURI); err != nil {
 				status = http.StatusBadRequest
-				http.Error(w, "invalid_redirect_uri", http.StatusBadRequest)
+				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
 			}
 			code, err := s.oauth.IssueAuthCode(oauth.AuthorizeRequest{

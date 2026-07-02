@@ -27,7 +27,7 @@ type Config struct {
 
 type Service struct {
 	cfg     Config
-	mu      sync.Mutex
+	mu      sync.RWMutex
 	clients map[string]client
 	codes   map[string]authCode
 	tokens  map[string]time.Time
@@ -180,14 +180,8 @@ func (s *Service) IssueAuthCode(req AuthorizeRequest) (string, error) {
 			return "", fmt.Errorf("invalid_request: code_challenge length invalid")
 		}
 	}
-	s.mu.Lock()
-	c, ok := s.clients[req.ClientID]
-	s.mu.Unlock()
-	if !ok {
-		return "", fmt.Errorf("unauthorized_client")
-	}
-	if !stringInSlice(req.RedirectURI, c.RedirectURIs) {
-		return "", fmt.Errorf("invalid_redirect_uri")
+	if err := s.ValidateClientRedirect(req.ClientID, req.RedirectURI); err != nil {
+		return "", err
 	}
 	code := randomString(32)
 	s.mu.Lock()
@@ -202,13 +196,20 @@ func (s *Service) IssueAuthCode(req AuthorizeRequest) (string, error) {
 	return code, nil
 }
 
-// IsRegisteredRedirectURI reports whether uri is a redirect URI registered for clientID.
-// Call this before issuing any redirect to make the validation visible to static analysis.
-func (s *Service) IsRegisteredRedirectURI(clientID, uri string) bool {
-	s.mu.Lock()
+// ValidateClientRedirect returns nil iff clientID is registered and uri is one
+// of its registered redirect URIs. Both IssueAuthCode and the HTTP handler call
+// this, so the validation logic has a single definition.
+func (s *Service) ValidateClientRedirect(clientID, uri string) error {
+	s.mu.RLock()
 	c, ok := s.clients[clientID]
-	s.mu.Unlock()
-	return ok && stringInSlice(uri, c.RedirectURIs)
+	s.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("unauthorized_client")
+	}
+	if !stringInSlice(uri, c.RedirectURIs) {
+		return fmt.Errorf("invalid_redirect_uri")
+	}
+	return nil
 }
 
 func (s *Service) ExchangeToken(req TokenExchangeRequest) (*TokenResponse, error) {

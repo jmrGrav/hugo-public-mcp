@@ -2,6 +2,8 @@ module github.com/jmrGrav/hugo-public-mcp
 
 go 1.25.0
 
+toolchain go1.25.11
+
 require (
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	golang.org/x/net v0.56.0
