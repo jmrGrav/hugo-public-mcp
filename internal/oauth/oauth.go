@@ -202,6 +202,15 @@ func (s *Service) IssueAuthCode(req AuthorizeRequest) (string, error) {
 	return code, nil
 }
 
+// IsRegisteredRedirectURI reports whether uri is a redirect URI registered for clientID.
+// Call this before issuing any redirect to make the validation visible to static analysis.
+func (s *Service) IsRegisteredRedirectURI(clientID, uri string) bool {
+	s.mu.Lock()
+	c, ok := s.clients[clientID]
+	s.mu.Unlock()
+	return ok && stringInSlice(uri, c.RedirectURIs)
+}
+
 func (s *Service) ExchangeToken(req TokenExchangeRequest) (*TokenResponse, error) {
 	if req.GrantType != "authorization_code" {
 		return nil, fmt.Errorf("unsupported_grant_type")

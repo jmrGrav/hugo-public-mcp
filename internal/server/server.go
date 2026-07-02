@@ -242,11 +242,18 @@ func (s *Service) httpHandler(logger *slog.Logger) http.Handler {
 				return
 			}
 			q := r.URL.Query()
+			clientID := q.Get("client_id")
 			redirectURI := q.Get("redirect_uri")
+			// Validate redirect_uri against registered client URIs before any redirect.
+			if !s.oauth.IsRegisteredRedirectURI(clientID, redirectURI) {
+				status = http.StatusBadRequest
+				http.Error(w, "invalid_redirect_uri", http.StatusBadRequest)
+				return
+			}
 			code, err := s.oauth.IssueAuthCode(oauth.AuthorizeRequest{
 				SourceIP:            requestSourceIP(r),
 				ResponseType:        q.Get("response_type"),
-				ClientID:            q.Get("client_id"),
+				ClientID:            clientID,
 				RedirectURI:         redirectURI,
 				State:               q.Get("state"),
 				CodeChallenge:       q.Get("code_challenge"),
@@ -254,7 +261,7 @@ func (s *Service) httpHandler(logger *slog.Logger) http.Handler {
 			})
 			if err != nil {
 				status = oauthAuthorizeErrorStatus(err)
-				if redirectURI == "" || strings.Contains(err.Error(), "invalid_redirect_uri") || strings.Contains(err.Error(), "unauthorized_client") || strings.Contains(err.Error(), "access_denied") {
+				if strings.Contains(err.Error(), "unauthorized_client") || strings.Contains(err.Error(), "access_denied") {
 					http.Error(w, oauthAuthorizeErrorCode(err), status)
 					return
 				}
