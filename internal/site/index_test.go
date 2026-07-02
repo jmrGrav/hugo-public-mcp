@@ -186,6 +186,48 @@ func TestHugeSiteStartupAndMemoryBudget(t *testing.T) {
 	}
 }
 
+func TestGetPageMarkdown(t *testing.T) {
+	idx := mustBuildMinimalIndex(t)
+
+	t.Run("returns markdown for known slug", func(t *testing.T) {
+		got, err := idx.GetPageMarkdown("/posts/hello")
+		if err != nil {
+			t.Fatalf("GetPageMarkdown() error = %v", err)
+		}
+		if got.Summary.Slug == "" {
+			t.Fatal("GetPageMarkdown() summary slug is empty")
+		}
+		if !strings.Contains(got.MarkdownContent, "Hello") {
+			t.Errorf("MarkdownContent missing page title: %q", got.MarkdownContent)
+		}
+		if len(got.MarkdownContent) == 0 {
+			t.Error("MarkdownContent is empty")
+		}
+	})
+
+	t.Run("returns error for unknown slug", func(t *testing.T) {
+		_, err := idx.GetPageMarkdown("/posts/does-not-exist")
+		if err == nil {
+			t.Fatal("GetPageMarkdown() expected error for unknown slug")
+		}
+	})
+
+	t.Run("rejects path traversal", func(t *testing.T) {
+		_, err := idx.GetPageMarkdown("../../../etc/passwd")
+		if err == nil {
+			t.Fatal("GetPageMarkdown() expected error for path traversal")
+		}
+	})
+
+	t.Run("nil index returns error", func(t *testing.T) {
+		var nilIdx *Index
+		_, err := nilIdx.GetPageMarkdown("/posts/hello")
+		if err == nil {
+			t.Fatal("GetPageMarkdown() expected error for nil index")
+		}
+	})
+}
+
 func mustBuildMinimalIndex(t *testing.T) *Index {
 	t.Helper()
 	root := filepath.Join("..", "..", "testdata", "fixtures", "public", "minimal")

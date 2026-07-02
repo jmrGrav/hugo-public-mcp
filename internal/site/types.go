@@ -29,6 +29,13 @@ type PageContent struct {
 	ContentText string      `json:"content_text,omitempty"`
 }
 
+// PageMarkdown is the authenticated view of a published page: summary metadata
+// plus full content rendered as Markdown. Only accessible with a valid bearer.
+type PageMarkdown struct {
+	Summary         PageSummary `json:"summary"`
+	MarkdownContent string      `json:"markdown_content"`
+}
+
 type TagSummary struct {
 	Name  string `json:"name"`
 	Count int    `json:"count"`
