@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/jmrGrav/hugo-public-mcp/internal/config"
+	"github.com/jmrGrav/hugo-public-mcp/internal/oauth"
 )
 
 func TestHTTPHandlerRejectsWrongMethod(t *testing.T) {
@@ -104,6 +106,143 @@ func TestHTTPHandlerOAuthDisabledKeepsAnonymousReadOnlyMCP(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestHTTPHandlerOAuthEnabledDiscoveryAndTokenFlow(t *testing.T) {
+	svc := mustTestService(t, true)
+	svc.cfg.OAuth = config.OAuthConfig{
+		Enabled:               true,
+		DynamicClientEnabled:  true,
+		RequirePKCE:           true,
+		TrustedAuthorizeCIDRs: []string{"192.0.2.10/32"},
+		AuthCodeTTLSeconds:    300,
+		AccessTokenTTLSeconds: 3600,
+	}
+	svc.oauth = oauth.NewService(svc.oauthConfigForRequest(httptest.NewRequest(http.MethodGet, "https://mcp.example.test/", nil)))
+
+	t.Run("serves real OAuth metadata when enabled", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, "/.well-known/oauth-authorization-server", nil)
+		req.Host = "mcp.example.test"
+		req.Header.Set("X-Forwarded-Proto", "https")
+		rec := httptest.NewRecorder()
+
+		svc.HTTPHandler().ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d want 200", rec.Code)
+		}
+		var body map[string]interface{}
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatalf("metadata JSON: %v", err)
+		}
+		if body["issuer"] != "https://mcp.example.test" || body["token_endpoint"] != "https://mcp.example.test/token" {
+			t.Fatalf("unexpected metadata: %#v", body)
+		}
+	})
+
+	registerBody := []byte(`{"redirect_uris":["https://client.example.test/callback"]}`)
+	registerReq := httptest.NewRequest(http.MethodPost, "/register", bytes.NewReader(registerBody))
+	registerReq.Host = "mcp.example.test"
+	registerReq.Header.Set("X-Forwarded-Proto", "https")
+	registerReq.Header.Set("Content-Type", "application/json")
+	registerRec := httptest.NewRecorder()
+	svc.HTTPHandler().ServeHTTP(registerRec, registerReq)
+	if registerRec.Code != http.StatusCreated {
+		t.Fatalf("register status = %d body = %q", registerRec.Code, registerRec.Body.String())
+	}
+	var registration struct {
+		ClientID string `json:"client_id"`
+	}
+	if err := json.Unmarshal(registerRec.Body.Bytes(), &registration); err != nil {
+		t.Fatalf("register JSON: %v", err)
+	}
+
+	verifier := "test-verifier-test-verifier-test-verifier"
+	challenge := oauth.CodeChallengeS256(verifier)
+	authURL := "/authorize?" + url.Values{
+		"response_type":         {"code"},
+		"client_id":             {registration.ClientID},
+		"redirect_uri":          {"https://client.example.test/callback"},
+		"state":                 {"state-1"},
+		"code_challenge":        {challenge},
+		"code_challenge_method": {"S256"},
+	}.Encode()
+	authReq := httptest.NewRequest(http.MethodGet, authURL, nil)
+	authReq.RemoteAddr = "192.0.2.10:12345"
+	authReq.Host = "mcp.example.test"
+	authReq.Header.Set("X-Forwarded-Proto", "https")
+	authRec := httptest.NewRecorder()
+	svc.HTTPHandler().ServeHTTP(authRec, authReq)
+	if authRec.Code != http.StatusFound {
+		t.Fatalf("authorize status = %d body = %q", authRec.Code, authRec.Body.String())
+	}
+	location, err := url.Parse(authRec.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("parse authorize redirect: %v", err)
+	}
+	code := location.Query().Get("code")
+	if code == "" || location.Query().Get("state") != "state-1" {
+		t.Fatalf("unexpected authorize redirect: %s", authRec.Header().Get("Location"))
+	}
+
+	tokenForm := url.Values{
+		"grant_type":    {"authorization_code"},
+		"client_id":     {registration.ClientID},
+		"code":          {code},
+		"redirect_uri":  {"https://client.example.test/callback"},
+		"code_verifier": {verifier},
+	}
+	tokenReq := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader(tokenForm.Encode()))
+	tokenReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	tokenRec := httptest.NewRecorder()
+	svc.HTTPHandler().ServeHTTP(tokenRec, tokenReq)
+	if tokenRec.Code != http.StatusOK {
+		t.Fatalf("token status = %d body = %q", tokenRec.Code, tokenRec.Body.String())
+	}
+	var token struct {
+		AccessToken string `json:"access_token"`
+		TokenType   string `json:"token_type"`
+	}
+	if err := json.Unmarshal(tokenRec.Body.Bytes(), &token); err != nil {
+		t.Fatalf("token JSON: %v", err)
+	}
+	if token.AccessToken == "" || token.TokenType != "Bearer" {
+		t.Fatalf("unexpected token: %#v", token)
+	}
+}
+
+func TestHTTPHandlerOAuthEnabledKeepsAnonymousReadOnlyAndRejectsInvalidBearer(t *testing.T) {
+	svc := mustTestService(t, true)
+	svc.cfg.OAuth.Enabled = true
+	svc.oauth = oauth.NewService(svc.oauthConfigForRequest(httptest.NewRequest(http.MethodGet, "https://mcp.example.test/", nil)))
+
+	t.Run("anonymous MCP remains allowed", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader([]byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+
+		svc.HTTPHandler().ServeHTTP(rec, req)
+
+		if rec.Code == http.StatusUnauthorized || rec.Code == http.StatusForbidden {
+			t.Fatalf("anonymous read-only MCP must remain allowed, got %d", rec.Code)
+		}
+	})
+
+	t.Run("invalid bearer is rejected", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader([]byte(`{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("Authorization", "Bearer invalid")
+		rec := httptest.NewRecorder()
+
+		svc.HTTPHandler().ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("status = %d want 401", rec.Code)
+		}
+		if got := rec.Header().Get("WWW-Authenticate"); !strings.Contains(got, "Bearer") {
+			t.Fatalf("missing bearer challenge: %q", got)
+		}
+	})
 }
 
 func TestHTTPHandlerDisablesStreamingEndpointWhenConfigured(t *testing.T) {
