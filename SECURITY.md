@@ -32,3 +32,4 @@ Provide:
 
 Do not include secrets in the report body.
 
+You can also use GitHub's private security advisory flow for sensitive reports when available.

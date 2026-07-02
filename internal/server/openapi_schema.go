@@ -1,4 +1,6 @@
-{
+package server
+
+var openAPISchema = []byte(`{
   "openapi": "3.0.3",
   "info": {
     "title": "hugo-public-mcp",
@@ -118,4 +120,4 @@
       }
     }
   }
-}
+}`)
