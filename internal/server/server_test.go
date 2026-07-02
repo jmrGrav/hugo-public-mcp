@@ -243,6 +243,18 @@ func TestHTTPHandlerOAuthEnabledKeepsAnonymousReadOnlyAndRejectsInvalidBearer(t 
 			t.Fatalf("missing bearer challenge: %q", got)
 		}
 	})
+
+	t.Run("non public tool calls are forbidden before MCP dispatch", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader([]byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"publish_post","arguments":{}}}`)))
+		req.Header.Set("Content-Type", "application/json")
+		rec := httptest.NewRecorder()
+
+		svc.HTTPHandler().ServeHTTP(rec, req)
+
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("status = %d want 403 body = %q", rec.Code, rec.Body.String())
+		}
+	})
 }
 
 func TestHTTPHandlerDisablesStreamingEndpointWhenConfigured(t *testing.T) {

@@ -26,6 +26,18 @@ const (
 	Version = "v0.0.1"
 )
 
+var publicToolNames = map[string]struct{}{
+	"list_pages":           {},
+	"get_page":             {},
+	"search_pages":         {},
+	"get_recent_posts":     {},
+	"list_tags":            {},
+	"list_categories":      {},
+	"get_sitemap":          {},
+	"get_feed":             {},
+	"get_site_information": {},
+}
+
 type Service struct {
 	cfg    config.Config
 	index  *site.Index
@@ -358,6 +370,13 @@ func (s *Service) httpHandler(logger *slog.Logger) http.Handler {
 						return
 					}
 				}
+				if containsForbiddenToolCall(body) {
+					status = http.StatusForbidden
+					w.Header().Set("Content-Type", "application/json; charset=utf-8")
+					w.WriteHeader(http.StatusForbidden)
+					_ = json.NewEncoder(w).Encode(map[string]string{"error": "forbidden_tool"})
+					return
+				}
 			}
 			r.Body = io.NopCloser(bytes.NewReader(body))
 			streaming.ServeHTTP(w, r)
@@ -376,6 +395,43 @@ func (s *Service) httpHandler(logger *slog.Logger) http.Handler {
 			http.NotFound(w, r)
 		}
 	})
+}
+
+func containsForbiddenToolCall(body []byte) bool {
+	trimmed := bytes.TrimSpace(body)
+	if len(trimmed) == 0 {
+		return false
+	}
+	if trimmed[0] == '[' {
+		var batch []json.RawMessage
+		if err := json.Unmarshal(trimmed, &batch); err != nil {
+			return false
+		}
+		for _, raw := range batch {
+			if isForbiddenToolCall(raw) {
+				return true
+			}
+		}
+		return false
+	}
+	return isForbiddenToolCall(trimmed)
+}
+
+func isForbiddenToolCall(raw []byte) bool {
+	var req struct {
+		Method string `json:"method"`
+		Params struct {
+			Name string `json:"name"`
+		} `json:"params"`
+	}
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return false
+	}
+	if req.Method != "tools/call" {
+		return false
+	}
+	_, ok := publicToolNames[req.Params.Name]
+	return !ok
 }
 
 func (s *Service) oauthForRequest(r *http.Request) *oauth.Service {
