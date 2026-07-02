@@ -573,6 +573,24 @@ func TestPrivateToolCallForbiddenWithoutBearer(t *testing.T) {
 	}
 }
 
+func TestPrivateToolCallInvalidBearer(t *testing.T) {
+	svc := mustTestServiceOAuth(t)
+
+	body := []byte(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"get_full_page_markdown","arguments":{"slug":"/posts/hello"}}}`)
+	req := httptest.NewRequest(http.MethodPost, "/mcp", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer totally-invalid-token")
+	rec := httptest.NewRecorder()
+	svc.HTTPHandler().ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d want 401", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "invalid_token") {
+		t.Errorf("body missing invalid_token: %q", rec.Body.String())
+	}
+}
+
 func TestPrivateToolCallSucceedsWithValidBearer(t *testing.T) {
 	svc := mustTestServiceOAuth(t)
 	token := obtainValidToken(t, svc)
