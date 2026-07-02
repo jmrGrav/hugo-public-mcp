@@ -180,7 +180,7 @@ func (s *Service) IssueAuthCode(req AuthorizeRequest) (string, error) {
 			return "", fmt.Errorf("invalid_request: code_challenge length invalid")
 		}
 	}
-	if err := s.ValidateClientRedirect(req.ClientID, req.RedirectURI); err != nil {
+	if _, err := s.ValidateClientRedirect(req.ClientID, req.RedirectURI); err != nil {
 		return "", err
 	}
 	code := randomString(32)
@@ -196,20 +196,23 @@ func (s *Service) IssueAuthCode(req AuthorizeRequest) (string, error) {
 	return code, nil
 }
 
-// ValidateClientRedirect returns nil iff clientID is registered and uri is one
-// of its registered redirect URIs. Both IssueAuthCode and the HTTP handler call
-// this, so the validation logic has a single definition.
-func (s *Service) ValidateClientRedirect(clientID, uri string) error {
+// ValidateClientRedirect returns the matching redirect URI from the server-side
+// registered list, or an error if clientID is unknown or uri is not registered.
+// The returned string is the server-owned value, not the caller-supplied input,
+// which breaks the taint chain for static-analysis tools.
+func (s *Service) ValidateClientRedirect(clientID, uri string) (string, error) {
 	s.mu.RLock()
 	c, ok := s.clients[clientID]
 	s.mu.RUnlock()
 	if !ok {
-		return fmt.Errorf("unauthorized_client")
+		return "", fmt.Errorf("unauthorized_client")
 	}
-	if !stringInSlice(uri, c.RedirectURIs) {
-		return fmt.Errorf("invalid_redirect_uri")
+	for _, r := range c.RedirectURIs {
+		if r == uri {
+			return r, nil
+		}
 	}
-	return nil
+	return "", fmt.Errorf("invalid_redirect_uri")
 }
 
 func (s *Service) ExchangeToken(req TokenExchangeRequest) (*TokenResponse, error) {

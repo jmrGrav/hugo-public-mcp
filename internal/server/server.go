@@ -242,11 +242,11 @@ func (s *Service) httpHandler(logger *slog.Logger) http.Handler {
 				return
 			}
 			q := r.URL.Query()
-			clientID := q.Get("client_id")
-			redirectURI := q.Get("redirect_uri")
-			// Validate client + redirect_uri before any redirect so CodeQL can
-			// trace that the destination URI is never user-controlled past this point.
-			if err := s.oauth.ValidateClientRedirect(clientID, redirectURI); err != nil {
+			// safeRedirectURI is the server-owned copy of redirect_uri retrieved from
+			// the registered client store, not the raw user-supplied query parameter.
+			// This breaks the taint chain: no user-controlled value reaches http.Redirect.
+			safeRedirectURI, err := s.oauth.ValidateClientRedirect(q.Get("client_id"), q.Get("redirect_uri"))
+			if err != nil {
 				status = http.StatusBadRequest
 				http.Error(w, err.Error(), http.StatusBadRequest)
 				return
@@ -254,8 +254,8 @@ func (s *Service) httpHandler(logger *slog.Logger) http.Handler {
 			code, err := s.oauth.IssueAuthCode(oauth.AuthorizeRequest{
 				SourceIP:            requestSourceIP(r),
 				ResponseType:        q.Get("response_type"),
-				ClientID:            clientID,
-				RedirectURI:         redirectURI,
+				ClientID:            q.Get("client_id"),
+				RedirectURI:         safeRedirectURI,
 				State:               q.Get("state"),
 				CodeChallenge:       q.Get("code_challenge"),
 				CodeChallengeMethod: q.Get("code_challenge_method"),
@@ -271,14 +271,14 @@ func (s *Service) httpHandler(logger *slog.Logger) http.Handler {
 				if state := q.Get("state"); state != "" {
 					params.Set("state", state)
 				}
-				http.Redirect(w, r, redirectURI+"?"+params.Encode(), http.StatusFound)
+				http.Redirect(w, r, safeRedirectURI+"?"+params.Encode(), http.StatusFound)
 				return
 			}
 			params := url.Values{"code": {code}}
 			if state := q.Get("state"); state != "" {
 				params.Set("state", state)
 			}
-			http.Redirect(w, r, redirectURI+"?"+params.Encode(), http.StatusFound)
+			http.Redirect(w, r, safeRedirectURI+"?"+params.Encode(), http.StatusFound)
 			return
 		case "/token":
 			if !s.cfg.OAuth.Enabled || s.oauth == nil {
