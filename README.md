@@ -66,6 +66,7 @@ The binary reads its YAML config from `HUGO_PUBLIC_MCP_CONFIG` and supports `std
 - `docs/api-shield.md`
 - `docs/dns-aid.md`
 - `docs/openapi.md`
+- `docs/oauth-runtime-evaluation.md`
 - `docs/architecture.md`
 - `docs/threat-model.md`
 - `docs/mvp-validation.md`
