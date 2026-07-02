@@ -25,7 +25,11 @@ func TestRegisterToolsExposesReadOnlyAnnotations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("client connect error = %v", err)
 	}
-	defer session.Close()
+	defer func() {
+		if err := session.Close(); err != nil {
+			t.Fatalf("session close error = %v", err)
+		}
+	}()
 
 	tools, err := session.ListTools(ctx, nil)
 	if err != nil {
@@ -60,7 +64,11 @@ func TestRegisterToolsRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("client connect error = %v", err)
 	}
-	defer session.Close()
+	defer func() {
+		if err := session.Close(); err != nil {
+			t.Fatalf("session close error = %v", err)
+		}
+	}()
 
 	pageRes, err := session.CallTool(ctx, &mcp.CallToolParams{Name: "get_page", Arguments: map[string]any{"slug": "/posts/hello"}})
 	if err != nil {

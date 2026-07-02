@@ -4,7 +4,7 @@
 
 ## Recommended rules
 
-- Proxy `mcp.example.com` through Cloudflare.
+- Proxy `mcp.arleo.eu` through Cloudflare.
 - Lock the origin so only Cloudflare edge IP ranges and trusted LAN/admin ranges can reach TCP 80/443.
 - Apply a rate limit to `/mcp` and `/mcp/events`.
 - Keep the MCP origin private; do not expose the source repo or any write-capable endpoint.

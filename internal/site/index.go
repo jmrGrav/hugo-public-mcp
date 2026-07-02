@@ -54,6 +54,10 @@ func BuildIndex(ctx context.Context, root string, cfg Config) (*Index, error) {
 		},
 	}
 
+	if err := loadStaticResources(canonicalRoot, idx); err != nil {
+		return nil, err
+	}
+
 	err = filepath.WalkDir(canonicalRoot, func(p string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -159,6 +163,40 @@ func BuildIndex(ctx context.Context, root string, cfg Config) (*Index, error) {
 	})
 	idx.reindex()
 	return idx, nil
+}
+
+func loadStaticResources(root string, idx *Index) error {
+	if idx == nil {
+		return nil
+	}
+	for _, rel := range []string{
+		"robots.txt",
+		"llms.txt",
+		"feed.json",
+		"sitemap.xml",
+		"index.xml",
+		"auth.md",
+		".well-known/api-catalog",
+		".well-known/agent-skills/index.json",
+		".well-known/agent-skills/discover_hugo_site.md",
+		".well-known/agent-skills/search_public_pages.md",
+		".well-known/agent-skills/read_public_page.md",
+		".well-known/agent-skills/list_public_tags.md",
+		".well-known/agent-skills/list_public_categories.md",
+		".well-known/agent-skills/get_public_feed.md",
+		".well-known/agent-skills/get_public_sitemap.md",
+	} {
+		full := filepath.Join(root, filepath.FromSlash(rel))
+		raw, err := os.ReadFile(full)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return err
+		}
+		idx.resources["/"+filepath.ToSlash(rel)] = string(raw)
+	}
+	return nil
 }
 
 func (idx *Index) reindex() {
@@ -561,9 +599,7 @@ func NormalizeSlug(input string) (string, error) {
 	if strings.Contains(s, "\\") {
 		return "", fmt.Errorf("slug contains backslashes")
 	}
-	if strings.HasPrefix(s, "/") {
-		s = strings.TrimPrefix(s, "/")
-	}
+	s = strings.TrimPrefix(s, "/")
 	rel, err := pathguard.ValidateRelative(s)
 	if err != nil {
 		return "", fmt.Errorf("slug traversal detected: %w", err)

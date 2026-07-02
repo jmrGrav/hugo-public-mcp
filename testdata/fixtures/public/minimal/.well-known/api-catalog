@@ -1,0 +1,26 @@
+[
+  {
+    "anchor": "https://www.arleo.eu",
+    "item": [
+      {
+        "href": "https://mcp.arleo.eu/mcp",
+        "rel": ["service-desc"],
+        "type": "application/json",
+        "title": "Public read-only MCP endpoint"
+      },
+      {
+        "href": "https://github.com/jmrGrav/hugo-public-mcp",
+        "rel": ["service-doc"],
+        "type": "text/html",
+        "title": "Documentation repository"
+      },
+      {
+        "href": "https://mcp.arleo.eu/health",
+        "rel": ["status"],
+        "type": "application/json",
+        "title": "Health endpoint"
+      }
+    ]
+  }
+]
+

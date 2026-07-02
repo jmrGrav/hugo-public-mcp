@@ -1,20 +1,25 @@
+version: "2"
+
 run:
-  timeout: 5m
   tests: true
 
 linters:
-  disable-all: true
+  default: none
   enable:
     - errcheck
     - govet
-    - gofmt
     - ineffassign
     - staticcheck
+  settings:
+    errcheck:
+      check-type-assertions: true
+  exclusions:
+    paths:
+      - testdata
 
-issues:
-  exclude-dirs:
-    - testdata
-
-linters-settings:
-  errcheck:
-    check-type-assertions: true
+formatters:
+  enable:
+    - gofmt
+  exclusions:
+    paths:
+      - testdata

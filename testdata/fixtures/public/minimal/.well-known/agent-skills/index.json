@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schemas.agentskills.io/discovery/0.2.0/schema.json",
+  "skills": [
+    {
+      "name": "discover_hugo_site",
+      "type": "skill-md",
+      "description": "Discover the public Hugo site and its canonical entry points.",
+      "url": "https://www.arleo.eu/.well-known/agent-skills/discover_hugo_site.md",
+      "sha256": "746095d5614e177c7c27965cc022e0224e401edc7ed6a74e0ec59d6852edb938"
+    }
+  ]
+}

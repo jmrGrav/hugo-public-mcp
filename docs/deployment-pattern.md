@@ -32,6 +32,13 @@ Cloudflare proxied hostname
 - Keep proxy buffers and timeout values conservative.
 - Use dedicated logs for the MCP host.
 
+## Cloudflare API Shield
+
+- Keep the zone in monitor/log mode initially.
+- Upload a minimal OpenAPI schema that describes only `POST /mcp`.
+- Keep the canonical hostname in the schema and discovery card as `mcp.arleo.eu`.
+- Do not add OAuth, write endpoints, or extra discovery surfaces for the MVP.
+
 ## Intentional exclusions
 
 - no direct public access to the app port
@@ -39,4 +46,3 @@ Cloudflare proxied hostname
 - no draft exposure
 - no API write surface
 - no dynamic conversion endpoint
-

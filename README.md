@@ -26,6 +26,7 @@ This repository is at release-candidate quality for the MVP scope:
 - unit, integration, and scale tests
 - CI and lint configuration
 - deployment examples for systemd, nginx/openresty, Caddy, Traefik, and Cloudflare
+- GitHub repository hardening files, templates, and automated security scans
 
 ## Security posture
 
@@ -42,6 +43,16 @@ The public server is intentionally narrow:
 - no disk access during requests when the in-memory index is sufficient
 - no mutation-capable MCP tools
 
+## Repository governance
+
+The repository includes:
+
+- branch protection rules for `main`
+- GitHub Actions CI, lint, CodeQL, and secret scanning
+- Dependabot updates
+- issue and pull request templates
+- a CODEOWNERS file and support guidance
+
 ## Configuration
 
 See `examples/arleo.eu/config.example.yaml` for a concrete published-site example.
@@ -49,6 +60,12 @@ The binary reads its YAML config from `HUGO_PUBLIC_MCP_CONFIG` and supports `std
 
 ## Documentation
 
+- `docs/installation.md`
+- `docs/deployment.md`
+- `docs/cloudflare.md`
+- `docs/api-shield.md`
+- `docs/dns-aid.md`
+- `docs/openapi.md`
 - `docs/architecture.md`
 - `docs/threat-model.md`
 - `docs/mvp-validation.md`

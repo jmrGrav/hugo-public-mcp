@@ -25,6 +25,15 @@ func TestBuildIndexParsesPublicFixture(t *testing.T) {
 	if got, ok := idx.GetResource("/sitemap.xml"); !ok || !strings.Contains(got, "<urlset") {
 		t.Fatalf("GetResource(sitemap) = %q, %v", got, ok)
 	}
+	if got, ok := idx.GetResource("/auth.md"); !ok || !strings.Contains(got, "no registration required") {
+		t.Fatalf("GetResource(auth) = %q, %v", got, ok)
+	}
+	if got, ok := idx.GetResource("/.well-known/api-catalog"); !ok || !strings.Contains(got, "mcp.arleo.eu/mcp") {
+		t.Fatalf("GetResource(api-catalog) = %q, %v", got, ok)
+	}
+	if got, ok := idx.GetResource("/.well-known/agent-skills/index.json"); !ok || !strings.Contains(got, "discover_hugo_site") {
+		t.Fatalf("GetResource(agent-skills index) = %q, %v", got, ok)
+	}
 }
 
 func TestSearchUsesMetadataOnly(t *testing.T) {
