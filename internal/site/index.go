@@ -599,9 +599,7 @@ func NormalizeSlug(input string) (string, error) {
 	if strings.Contains(s, "\\") {
 		return "", fmt.Errorf("slug contains backslashes")
 	}
-	if strings.HasPrefix(s, "/") {
-		s = strings.TrimPrefix(s, "/")
-	}
+	s = strings.TrimPrefix(s, "/")
 	rel, err := pathguard.ValidateRelative(s)
 	if err != nil {
 		return "", fmt.Errorf("slug traversal detected: %w", err)

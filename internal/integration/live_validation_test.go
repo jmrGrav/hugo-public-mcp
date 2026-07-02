@@ -68,7 +68,11 @@ func TestLiveSiteValidation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("client connect error = %v", err)
 	}
-	defer session.Close()
+	defer func() {
+		if err := session.Close(); err != nil {
+			t.Fatalf("session close error = %v", err)
+		}
+	}()
 
 	validateTools(t, ctx, session)
 }
