@@ -7,6 +7,11 @@ http_bind_addr: 127.0.0.1
 http_bind_port: 8088
 streaming_enabled: true
 
+oauth:
+  # Disabled by default. Do not enable until real OAuth endpoints, token storage,
+  # ACL tests, and staging validation are complete.
+  enabled: false
+
 limits:
   max_index_entries: 5000
   max_result_items: 50
