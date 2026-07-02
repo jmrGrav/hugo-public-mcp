@@ -237,6 +237,30 @@ func (idx *Index) GetPage(slug string) (PageContent, error) {
 	return idx.Pages[pos], nil
 }
 
+// GetPageMarkdown returns the Markdown-formatted full content of a published page.
+// The slug must exist in the index; arbitrary paths are rejected by NormalizeSlug.
+func (idx *Index) GetPageMarkdown(slug string) (PageMarkdown, error) {
+	if idx == nil {
+		return PageMarkdown{}, fmt.Errorf("index not initialized")
+	}
+	page, err := idx.GetPage(slug)
+	if err != nil {
+		return PageMarkdown{}, err
+	}
+	doc, err := html.Parse(strings.NewReader(page.ContentHTML))
+	if err != nil {
+		return PageMarkdown{Summary: page.Summary, MarkdownContent: page.ContentText}, nil
+	}
+	body := findElement(doc, "body")
+	if body == nil {
+		return PageMarkdown{Summary: page.Summary, MarkdownContent: page.ContentText}, nil
+	}
+	return PageMarkdown{
+		Summary:         page.Summary,
+		MarkdownContent: htmlBodyToMarkdown(body),
+	}, nil
+}
+
 func (idx *Index) Search(query string, limit int) []PageSummary {
 	if idx == nil {
 		return nil
