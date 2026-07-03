@@ -647,7 +647,13 @@ func (s *Service) buildDiscoveryCard(r *http.Request) serverCard {
 	}
 	if s.cfg.OAuth.Enabled {
 		card.Auth = "oauth2-optional"
-		card.AuthenticatedTools = []string{"get_full_page_markdown"}
+		card.AuthenticatedTools = []string{
+			"get_full_page_markdown",
+			"get_page_frontmatter",
+			"get_related_content",
+			"build_agent_context",
+			"export_agent_context",
+		}
 	} else {
 		card.Auth = "none"
 	}

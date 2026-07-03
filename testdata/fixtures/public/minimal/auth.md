@@ -27,6 +27,10 @@ Registration grants access to authenticated-only tools via bearer token.
 ### Authenticated tools (bearer required)
 
 - `get_full_page_markdown` — Returns the full Markdown-formatted content of a published page.
+- `get_page_frontmatter` — Returns structured metadata for a published page including estimated reading time.
+- `get_related_content` — Returns pages related to a given slug by shared tags or categories.
+- `build_agent_context` — Returns a complete enriched context bundle: metadata, reading time, full Markdown content, and related pages.
+- `export_agent_context` — Paginated export of page context bundles with optional tag or category filter.
 
 ### Access policy
 

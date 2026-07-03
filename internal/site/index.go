@@ -262,6 +262,221 @@ func (idx *Index) GetPageMarkdown(slug string) (PageMarkdown, error) {
 	}, nil
 }
 
+// GetFrontmatter returns structured metadata for a published page including an
+// estimated reading time (words / 200 words-per-minute, minimum 1 when non-empty).
+func (idx *Index) GetFrontmatter(slug string) (PageFrontmatter, error) {
+	if idx == nil {
+		return PageFrontmatter{}, fmt.Errorf("index not initialized")
+	}
+	page, err := idx.GetPage(slug)
+	if err != nil {
+		return PageFrontmatter{}, err
+	}
+	return PageFrontmatter{
+		Summary:        page.Summary,
+		ReadingTimeMin: estimateReadingMinutes(page.ContentText),
+	}, nil
+}
+
+// RelatedPages returns pages sharing tags or categories with the given slug,
+// sorted by number of shared taxonomy terms (descending) then by date.
+func (idx *Index) RelatedPages(slug string, limit int) ([]RelatedPage, error) {
+	if idx == nil {
+		return nil, fmt.Errorf("index not initialized")
+	}
+	norm, err := NormalizeSlug(slug)
+	if err != nil {
+		return nil, err
+	}
+	ref, ok := idx.pageBySlug[norm]
+	if !ok {
+		return nil, fmt.Errorf("page not found: %s", norm)
+	}
+	refSummary := idx.Pages[ref].Summary
+	tagSet := make(map[string]struct{}, len(refSummary.Tags))
+	for _, t := range refSummary.Tags {
+		tagSet[t] = struct{}{}
+	}
+	catSet := make(map[string]struct{}, len(refSummary.Categories))
+	for _, c := range refSummary.Categories {
+		catSet[c] = struct{}{}
+	}
+	if limit <= 0 || limit > 20 {
+		limit = 5
+	}
+	type scored struct {
+		page  PageSummary
+		score int
+		shared RelatedPage
+	}
+	var candidates []scored
+	for i, p := range idx.Pages {
+		if i == ref {
+			continue
+		}
+		var sharedTags, sharedCats []string
+		for _, t := range p.Summary.Tags {
+			if _, ok := tagSet[t]; ok {
+				sharedTags = append(sharedTags, t)
+			}
+		}
+		for _, c := range p.Summary.Categories {
+			if _, ok := catSet[c]; ok {
+				sharedCats = append(sharedCats, c)
+			}
+		}
+		score := len(sharedTags) + len(sharedCats)
+		if score == 0 {
+			continue
+		}
+		candidates = append(candidates, scored{
+			page:  p.Summary,
+			score: score,
+			shared: RelatedPage{
+				Slug:             p.Summary.Slug,
+				Title:            p.Summary.Title,
+				CanonicalURL:     p.Summary.CanonicalURL,
+				SharedTags:       sharedTags,
+				SharedCategories: sharedCats,
+			},
+		})
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].score != candidates[j].score {
+			return candidates[i].score > candidates[j].score
+		}
+		return candidates[i].page.Date.After(candidates[j].page.Date)
+	})
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+	out := make([]RelatedPage, len(candidates))
+	for i, c := range candidates {
+		out[i] = c.shared
+	}
+	return out, nil
+}
+
+// GetAgentContext returns a complete enriched context bundle for a published
+// page: summary, reading time, full Markdown content, and related pages.
+// Response content is capped at 256 KB of Markdown to keep responses bounded.
+func (idx *Index) GetAgentContext(slug string) (AgentContext, error) {
+	if idx == nil {
+		return AgentContext{}, fmt.Errorf("index not initialized")
+	}
+	fm, err := idx.GetFrontmatter(slug)
+	if err != nil {
+		return AgentContext{}, err
+	}
+	md, err := idx.GetPageMarkdown(slug)
+	if err != nil {
+		return AgentContext{}, err
+	}
+	related, _ := idx.RelatedPages(slug, 5)
+	const maxMarkdownBytes = 256 * 1024
+	content := md.MarkdownContent
+	if len(content) > maxMarkdownBytes {
+		content = content[:maxMarkdownBytes]
+	}
+	return AgentContext{
+		Summary:         fm.Summary,
+		ReadingTimeMin:  fm.ReadingTimeMin,
+		MarkdownContent: content,
+		Related:         related,
+	}, nil
+}
+
+// ExportPages returns a paginated slice of page context bundles. cursor is the
+// slug of the first page to include (empty = start from beginning). tag and
+// category filter pages to those matching. limit is capped at 10.
+// Returns the slice, the next cursor (empty when exhausted), and the total
+// number of pages in the filtered set.
+func (idx *Index) ExportPages(cursor, tag, category string, limit int) (ExportResult, error) {
+	if idx == nil {
+		return ExportResult{}, fmt.Errorf("index not initialized")
+	}
+	if limit <= 0 || limit > 10 {
+		limit = 10
+	}
+	// Build filtered list (pages are already sorted by date desc).
+	var filtered []int
+	for i, p := range idx.Pages {
+		if tag != "" && !sliceContains(p.Summary.Tags, tag) {
+			continue
+		}
+		if category != "" && !sliceContains(p.Summary.Categories, category) {
+			continue
+		}
+		filtered = append(filtered, i)
+	}
+	total := len(filtered)
+	// Resolve cursor to offset.
+	start := 0
+	if cursor != "" {
+		norm, err := NormalizeSlug(cursor)
+		if err == nil {
+			for offset, i := range filtered {
+				if idx.Pages[i].Summary.Slug == norm {
+					start = offset
+					break
+				}
+			}
+		}
+	}
+	if start >= len(filtered) {
+		return ExportResult{Total: total}, nil
+	}
+	end := start + limit
+	if end > len(filtered) {
+		end = len(filtered)
+	}
+	slice := filtered[start:end]
+	var nextCursor string
+	if end < len(filtered) {
+		nextCursor = idx.Pages[filtered[end]].Summary.Slug
+	}
+	out := make([]PageExport, 0, len(slice))
+	for _, i := range slice {
+		p := idx.Pages[i]
+		md, err := idx.GetPageMarkdown(p.Summary.Slug)
+		if err != nil {
+			continue
+		}
+		const maxMarkdownBytes = 512 * 1024 / 10 // ~51KB per page to stay under 512KB total
+		content := md.MarkdownContent
+		if len(content) > maxMarkdownBytes {
+			content = content[:maxMarkdownBytes]
+		}
+		out = append(out, PageExport{
+			Summary:         p.Summary,
+			ReadingTimeMin:  estimateReadingMinutes(p.ContentText),
+			MarkdownContent: content,
+		})
+	}
+	return ExportResult{Pages: out, NextCursor: nextCursor, Total: total}, nil
+}
+
+func sliceContains(slice []string, v string) bool {
+	for _, s := range slice {
+		if s == v {
+			return true
+		}
+	}
+	return false
+}
+
+func estimateReadingMinutes(text string) int {
+	words := len(strings.Fields(text))
+	if words == 0 {
+		return 0
+	}
+	minutes := words / 200
+	if words%200 > 0 {
+		minutes++
+	}
+	return minutes
+}
+
 func (idx *Index) Search(query string, limit int) []PageSummary {
 	if idx == nil {
 		return nil
