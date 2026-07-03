@@ -372,6 +372,9 @@ func (s *Service) httpHandler(logger *slog.Logger) http.Handler {
 			if r.Method != http.MethodPost {
 				status = http.StatusMethodNotAllowed
 				w.Header().Set("Allow", http.MethodPost)
+				if s.cfg.OAuth.Enabled && s.oauth != nil {
+					w.Header().Set("WWW-Authenticate", fmt.Sprintf("Bearer realm=%q, resource_metadata=%q", requestBaseURL(r), requestBaseURL(r)+"/.well-known/oauth-protected-resource"))
+				}
 				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 				return
 			}
