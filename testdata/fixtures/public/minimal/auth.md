@@ -2,8 +2,7 @@
 
 ## Agent authentication policy
 
-`arleo.eu` offers an optional OAuth 2.0 layer for agents that need authenticated access to richer content tools.
-Anonymous read-only access to all public MCP tools remains available without registration.
+`arleo.eu` exposes two complementary authentication layers for AI agents.
 
 ## Public MCP (no registration required)
 
@@ -11,18 +10,32 @@ Anonymous read-only access to all public MCP tools remains available without reg
 - No write capability. No private data. No admin access.
 - No OAuth/OIDC login required for these tools.
 
-## Agent registration (optional)
+## Agent registration (auth.md protocol)
 
-Registration grants access to authenticated-only tools via bearer token.
+Agents can self-register via the [auth.md](https://auth-md.com/) protocol to obtain an assertion token
+and exchange it for a bearer token granting access to enriched content tools.
 
-- **Registration endpoint**: `https://mcp.arleo.eu/register` (Dynamic Client Registration, RFC 7591)
-- **Authorization server**: `https://mcp.arleo.eu`
-- **Authorization endpoint**: `https://mcp.arleo.eu/authorize`
-- **Token endpoint**: `https://mcp.arleo.eu/token`
-- **OAuth flow**: Authorization Code + PKCE (RFC 7636)
-- **Credential type**: Bearer token
-- **Scope**: `mcp`
-- **PKCE required**: yes (`S256` method)
+**Discovery**: `https://mcp.arleo.eu/.well-known/oauth-authorization-server`
+
+### Identity endpoint
+
+```
+POST https://mcp.arleo.eu/agent/identity
+Content-Type: application/json
+
+{"type": "anonymous"}
+```
+
+Response includes `identity_assertion` (assertion token) and optional claim info.
+
+### Token exchange
+
+```
+POST https://mcp.arleo.eu/token
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=<identity_assertion>
+```
 
 ### Authenticated tools (bearer required)
 
@@ -38,6 +51,13 @@ Registration grants access to authenticated-only tools via bearer token.
 - No private user data. No admin tools. No write operations.
 - Content is limited to publicly published pages already accessible without authentication.
 - Authentication grants richer content format, not access to private information.
+
+## OAuth 2.0 (for agents supporting Authorization Code + PKCE)
+
+- **Registration endpoint**: `https://mcp.arleo.eu/register` (Dynamic Client Registration, RFC 7591)
+- **Authorization endpoint**: `https://mcp.arleo.eu/authorize`
+- **Token endpoint**: `https://mcp.arleo.eu/token`
+- **OAuth flow**: Authorization Code + PKCE (RFC 7636), scope `mcp`, `S256` required
 
 ## Discovery and policy
 

@@ -855,3 +855,149 @@ func TestNewPrivateToolsVisibleWithBearer(t *testing.T) {
 		}
 	}
 }
+
+func TestAgentIdentityAnonymous(t *testing.T) {
+	svc := mustTestServiceOAuth(t)
+	body := `{"type":"anonymous"}`
+	req := httptest.NewRequest(http.MethodPost, "/agent/identity", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	svc.HTTPHandler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d want 200 body = %q", rec.Code, rec.Body.String())
+	}
+	var resp map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("invalid JSON: %v", err)
+	}
+	for _, field := range []string{"registration_id", "registration_type", "identity_assertion", "claim_token"} {
+		if resp[field] == nil || resp[field] == "" {
+			t.Errorf("missing field %q in agent identity response", field)
+		}
+	}
+	if resp["registration_type"] != "anonymous" {
+		t.Errorf("registration_type = %v want anonymous", resp["registration_type"])
+	}
+}
+
+func TestAgentIdentityUnknownTypeRejects(t *testing.T) {
+	svc := mustTestServiceOAuth(t)
+	body := `{"type":"service_auth","login_hint":"test@example.com"}`
+	req := httptest.NewRequest(http.MethodPost, "/agent/identity", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	svc.HTTPHandler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d want 400", rec.Code)
+	}
+}
+
+func TestAgentIdentityNotFoundWithoutOAuth(t *testing.T) {
+	svc := mustTestService(t, false)
+	req := httptest.NewRequest(http.MethodPost, "/agent/identity", strings.NewReader(`{"type":"anonymous"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	svc.HTTPHandler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d want 404", rec.Code)
+	}
+}
+
+func TestAgentTokenExchangeViaAssertion(t *testing.T) {
+	svc := mustTestServiceOAuth(t)
+
+	// Register anonymously.
+	regReq := httptest.NewRequest(http.MethodPost, "/agent/identity", strings.NewReader(`{"type":"anonymous"}`))
+	regReq.Header.Set("Content-Type", "application/json")
+	regRec := httptest.NewRecorder()
+	svc.HTTPHandler().ServeHTTP(regRec, regReq)
+	if regRec.Code != http.StatusOK {
+		t.Fatalf("register status = %d", regRec.Code)
+	}
+	var regResp map[string]interface{}
+	_ = json.Unmarshal(regRec.Body.Bytes(), &regResp)
+	assertion, _ := regResp["identity_assertion"].(string)
+	if assertion == "" {
+		t.Fatal("no identity_assertion in register response")
+	}
+
+	// Exchange assertion for access token.
+	form := url.Values{
+		"grant_type": {"urn:ietf:params:oauth:grant-type:jwt-bearer"},
+		"assertion":  {assertion},
+	}
+	tokReq := httptest.NewRequest(http.MethodPost, "/token", strings.NewReader(form.Encode()))
+	tokReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	tokRec := httptest.NewRecorder()
+	svc.HTTPHandler().ServeHTTP(tokRec, tokReq)
+	if tokRec.Code != http.StatusOK {
+		t.Fatalf("token status = %d body = %q", tokRec.Code, tokRec.Body.String())
+	}
+	var tokResp map[string]interface{}
+	_ = json.Unmarshal(tokRec.Body.Bytes(), &tokResp)
+	if tokResp["access_token"] == nil {
+		t.Fatal("no access_token in token response")
+	}
+}
+
+func TestAgentIdentityClaimInitiate(t *testing.T) {
+	svc := mustTestServiceOAuth(t)
+
+	// Register first.
+	regReq := httptest.NewRequest(http.MethodPost, "/agent/identity", strings.NewReader(`{"type":"anonymous"}`))
+	regReq.Header.Set("Content-Type", "application/json")
+	regRec := httptest.NewRecorder()
+	svc.HTTPHandler().ServeHTTP(regRec, regReq)
+	var regResp map[string]interface{}
+	_ = json.Unmarshal(regRec.Body.Bytes(), &regResp)
+	claimToken, _ := regResp["claim_token"].(string)
+
+	claimBody, _ := json.Marshal(map[string]string{"claim_token": claimToken})
+	claimReq := httptest.NewRequest(http.MethodPost, "/agent/identity/claim", bytes.NewReader(claimBody))
+	claimReq.Header.Set("Content-Type", "application/json")
+	claimRec := httptest.NewRecorder()
+	svc.HTTPHandler().ServeHTTP(claimRec, claimReq)
+	if claimRec.Code != http.StatusOK {
+		t.Fatalf("claim status = %d body = %q", claimRec.Code, claimRec.Body.String())
+	}
+	var claimResp map[string]interface{}
+	_ = json.Unmarshal(claimRec.Body.Bytes(), &claimResp)
+	if claimResp["claim_attempt_id"] == nil {
+		t.Fatal("missing claim_attempt_id")
+	}
+	if claimResp["status"] != "initiated" {
+		t.Errorf("status = %v want initiated", claimResp["status"])
+	}
+}
+
+func TestAgentEventNotifyAccepted(t *testing.T) {
+	svc := mustTestServiceOAuth(t)
+	req := httptest.NewRequest(http.MethodPost, "/agent/event/notify", strings.NewReader(`test-event-token`))
+	req.Header.Set("Content-Type", "application/secevent+jwt")
+	rec := httptest.NewRecorder()
+	svc.HTTPHandler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d want 200", rec.Code)
+	}
+}
+
+func TestAgentAuthDiscoveryBlock(t *testing.T) {
+	svc := mustTestServiceOAuth(t)
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/oauth-authorization-server", nil)
+	rec := httptest.NewRecorder()
+	svc.HTTPHandler().ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	var meta map[string]interface{}
+	_ = json.Unmarshal(rec.Body.Bytes(), &meta)
+	agentAuth, ok := meta["agent_auth"].(map[string]interface{})
+	if !ok {
+		t.Fatal("agent_auth block missing from oauth-authorization-server metadata")
+	}
+	for _, field := range []string{"skill", "identity_endpoint", "claim_endpoint", "events_endpoint"} {
+		if agentAuth[field] == nil {
+			t.Errorf("agent_auth.%s is missing", field)
+		}
+	}
+}

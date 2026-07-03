@@ -26,11 +26,14 @@ type Config struct {
 }
 
 type Service struct {
-	cfg     Config
-	mu      sync.RWMutex
-	clients map[string]client
-	codes   map[string]authCode
-	tokens  map[string]time.Time
+	cfg              Config
+	mu               sync.RWMutex
+	clients          map[string]client
+	codes            map[string]authCode
+	tokens           map[string]time.Time
+	agentRegs        map[string]agentRegistration // assertionToken → registration
+	agentClaimTokens map[string]string            // claimToken → assertionToken
+	agentClaims      map[string]agentClaim        // claimAttemptID → claim
 }
 
 type client struct {
@@ -99,10 +102,13 @@ func NewService(cfg Config) *Service {
 		cfg.SupportedScopes = []string{"mcp"}
 	}
 	return &Service{
-		cfg:     cfg,
-		clients: make(map[string]client),
-		codes:   make(map[string]authCode),
-		tokens:  make(map[string]time.Time),
+		cfg:              cfg,
+		clients:          make(map[string]client),
+		codes:            make(map[string]authCode),
+		tokens:           make(map[string]time.Time),
+		agentRegs:        make(map[string]agentRegistration),
+		agentClaimTokens: make(map[string]string),
+		agentClaims:      make(map[string]agentClaim),
 	}
 }
 
@@ -113,11 +119,24 @@ func (s *Service) AuthorizationServerMetadata() map[string]interface{} {
 		"token_endpoint":                        s.cfg.Issuer + "/token",
 		"registration_endpoint":                 s.cfg.Issuer + "/register",
 		"response_types_supported":              []string{"code"},
-		"grant_types_supported":                 []string{"authorization_code"},
+		"grant_types_supported":                 []string{"authorization_code", "urn:ietf:params:oauth:grant-type:jwt-bearer", "urn:workos:agent-auth:grant-type:claim"},
 		"code_challenge_methods_supported":      []string{"S256"},
 		"token_endpoint_auth_methods_supported": []string{"none"},
 		"scopes_supported":                      s.cfg.SupportedScopes,
 		"service_documentation":                 s.cfg.Resource,
+		"agent_auth": map[string]interface{}{
+			"skill":                    s.cfg.Issuer + "/auth.md",
+			"identity_endpoint":        s.cfg.Issuer + "/agent/identity",
+			"claim_endpoint":           s.cfg.Issuer + "/agent/identity/claim",
+			"events_endpoint":          s.cfg.Issuer + "/agent/event/notify",
+			"identity_types_supported": []string{"anonymous"},
+			"identity_assertion": map[string]interface{}{
+				"assertion_types_supported": []string{"urn:ietf:params:oauth:token-type:id-jag"},
+			},
+			"events_supported": []string{
+				"https://schemas.workos.com/events/agent/auth/identity/assertion/revoked",
+			},
+		},
 	}
 }
 

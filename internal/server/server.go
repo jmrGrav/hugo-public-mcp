@@ -297,8 +297,21 @@ func (s *Service) httpHandler(logger *slog.Logger) http.Handler {
 				writeOAuthError(w, "invalid_request", http.StatusBadRequest)
 				return
 			}
+			grantType := r.FormValue("grant_type")
+			if grantType == "urn:ietf:params:oauth:grant-type:jwt-bearer" {
+				resp, err := s.oauth.ExchangeAgentAssertion(r.FormValue("assertion"))
+				if err != nil {
+					status = http.StatusBadRequest
+					writeOAuthError(w, "invalid_grant", http.StatusBadRequest)
+					return
+				}
+				w.Header().Set("Content-Type", "application/json; charset=utf-8")
+				w.Header().Set("Cache-Control", "no-store")
+				_ = json.NewEncoder(w).Encode(resp)
+				return
+			}
 			resp, err := s.oauth.ExchangeToken(oauth.TokenExchangeRequest{
-				GrantType:    r.FormValue("grant_type"),
+				GrantType:    grantType,
 				ClientID:     r.FormValue("client_id"),
 				RedirectURI:  r.FormValue("redirect_uri"),
 				Code:         r.FormValue("code"),
@@ -311,6 +324,88 @@ func (s *Service) httpHandler(logger *slog.Logger) http.Handler {
 			}
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			_ = json.NewEncoder(w).Encode(resp)
+			return
+		case "/agent/identity":
+			if !s.cfg.OAuth.Enabled || s.oauth == nil {
+				status = http.StatusNotFound
+				http.NotFound(w, r)
+				return
+			}
+			if r.Method != http.MethodPost {
+				status = http.StatusMethodNotAllowed
+				w.Header().Set("Allow", http.MethodPost)
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			var req struct {
+				Type string `json:"type"`
+			}
+			body, err := io.ReadAll(io.LimitReader(r.Body, 8192))
+			_ = r.Body.Close()
+			if err != nil || json.Unmarshal(body, &req) != nil {
+				status = http.StatusBadRequest
+				writeAgentAuthError(w, "invalid_request", http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-store")
+			switch req.Type {
+			case "anonymous":
+				resp, _ := s.oauth.RegisterAgentAnonymous()
+				_ = json.NewEncoder(w).Encode(resp)
+			default:
+				status = http.StatusBadRequest
+				writeAgentAuthError(w, "invalid_request", http.StatusBadRequest)
+			}
+			return
+		case "/agent/identity/claim":
+			if !s.cfg.OAuth.Enabled || s.oauth == nil {
+				status = http.StatusNotFound
+				http.NotFound(w, r)
+				return
+			}
+			if r.Method != http.MethodPost {
+				status = http.StatusMethodNotAllowed
+				w.Header().Set("Allow", http.MethodPost)
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			var claimReq struct {
+				ClaimToken string `json:"claim_token"`
+			}
+			body, err := io.ReadAll(io.LimitReader(r.Body, 8192))
+			_ = r.Body.Close()
+			if err != nil || json.Unmarshal(body, &claimReq) != nil || claimReq.ClaimToken == "" {
+				status = http.StatusBadRequest
+				writeAgentAuthError(w, "invalid_request", http.StatusBadRequest)
+				return
+			}
+			resp, err := s.oauth.InitiateClaim(claimReq.ClaimToken)
+			if err != nil {
+				status = http.StatusBadRequest
+				writeAgentAuthError(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-store")
+			_ = json.NewEncoder(w).Encode(resp)
+			return
+		case "/agent/event/notify":
+			if !s.cfg.OAuth.Enabled || s.oauth == nil {
+				status = http.StatusNotFound
+				http.NotFound(w, r)
+				return
+			}
+			if r.Method != http.MethodPost {
+				status = http.StatusMethodNotAllowed
+				w.Header().Set("Allow", http.MethodPost)
+				http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+				return
+			}
+			body, _ := io.ReadAll(io.LimitReader(r.Body, 65536))
+			_ = r.Body.Close()
+			slog.Info("agent_event_notify", "content_type", r.Header.Get("Content-Type"), "body_len", len(body))
+			w.WriteHeader(http.StatusOK)
 			return
 		case "/health":
 			if r.Method != http.MethodGet && r.Method != http.MethodHead {
@@ -527,6 +622,13 @@ func requestSourceIP(r *http.Request) string {
 func writeOAuthError(w http.ResponseWriter, code string, status int) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]string{"error": code})
+}
+
+func writeAgentAuthError(w http.ResponseWriter, code string, httpStatus int) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(httpStatus)
 	_ = json.NewEncoder(w).Encode(map[string]string{"error": code})
 }
 
