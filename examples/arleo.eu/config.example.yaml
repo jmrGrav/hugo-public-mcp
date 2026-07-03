@@ -15,6 +15,7 @@ oauth:
   resource: https://mcp.arleo.eu/mcp
   dynamic_client_registration: true
   require_pkce: true
+  # Add your reverse-proxy's IP if it is not on the same host (e.g. 192.168.122.1/32 for a KVM bridge)
   trusted_authorize_cidrs:
     - 127.0.0.1/32
     - ::1/128

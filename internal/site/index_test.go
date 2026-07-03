@@ -97,6 +97,8 @@ func TestUnicodeAndMultilingual(t *testing.T) {
 	root := t.TempDir()
 	writePage(t, root, "index.html", `<!doctype html><html lang="fr"><head><title>Accueil</title><meta name="description" content="Bienvenue 🌍"><link rel="canonical" href="https://example.test/"></head><body>Bonjour 🌍</body></html>`)
 	writePage(t, root, filepath.Join("posts", "cafe", "index.fr.html"), `<!doctype html><html lang="fr"><head><title>Café déjà vu</title><meta name="description" content="Résumé caféiné"><link rel="canonical" href="https://example.test/posts/cafe/"><meta property="article:published_time" content="2026-01-02T03:04:05Z"><meta property="article:tag" content="Sécurité"></head><body>Café déjà vu ☕</body></html>`)
+	// Category page with percent-encoded canonical URL (Hugo encodes non-ASCII in URLs)
+	writePage(t, root, filepath.Join("categories", "sécurité", "index.html"), `<!doctype html><html lang="fr"><head><title>Sécurité</title><link rel="canonical" href="https://example.test/categories/s%C3%A9curit%C3%A9/"></head><body></body></html>`)
 	idx, err := BuildIndex(context.Background(), root, Config{SiteURL: "https://example.test", DefaultLanguage: "fr", RejectHiddenPath: true, RejectSymlinks: true, MaxIndexEntries: 100})
 	if err != nil {
 		t.Fatalf("BuildIndex() error = %v", err)
@@ -114,6 +116,18 @@ func TestUnicodeAndMultilingual(t *testing.T) {
 	if !strings.Contains(got.ContentText, "☕") {
 		t.Fatalf("GetPage() unicode text missing: %q", got.ContentText)
 	}
+	// Percent-encoded canonical must decode to UTF-8 category name
+	cats := idx.ListCategories()
+	var catNames []string
+	for _, c := range cats {
+		catNames = append(catNames, c.Name)
+	}
+	for _, c := range cats {
+		if c.Name == "sécurité" {
+			return
+		}
+	}
+	t.Fatalf("ListCategories() category names %v do not contain decoded 'sécurité'", catNames)
 }
 
 func TestMalformedHTMLAndMetadata(t *testing.T) {

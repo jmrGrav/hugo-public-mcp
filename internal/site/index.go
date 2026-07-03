@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"os"
 	"path/filepath"
 	"sort"
@@ -597,6 +598,9 @@ func slugFromCanonical(raw string) string {
 	}
 	if !strings.HasPrefix(raw, "/") {
 		raw = "/" + raw
+	}
+	if decoded, err := url.PathUnescape(raw); err == nil {
+		raw = decoded
 	}
 	return normalizeSlug(raw)
 }
